@@ -211,6 +211,10 @@ user is scrolled up when lines are trimmed, the viewport offset is adjusted.
   A run always records its own start column when it restarts after a gap of
   empty cells; reusing the previous run's offset would draw it shifted left
   (visible in TUIs such as opencode).
+- Runs pass an explicit per-character advance (`cellWidth_`, zero for combining
+  marks) and clip to the row instead of the run box, so fallback glyphs with
+  negative bearings or overhang (box drawing, symbols, icons) keep their exact
+  cell positions and are not cut off at program borders.
 - Underline and strikethrough are drawn as 1-pixel lines; inverse swaps colors;
   invisible skips glyph drawing; blink is honored at render time.
 - 16 ANSI colors, a 256-color cube, and 24-bit RGB are supported. Default

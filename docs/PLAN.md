@@ -39,7 +39,7 @@
   focus/attention polish.
 - **M3 not started.**
 
-Latest measured release build: 525,312 bytes; 10,000 colored lines parsed and
+Latest measured release build: 526,336 bytes; 10,000 colored lines parsed and
 stored in 18.5 ms; resize cycle 5.9 ms; ~50 MB RSS with 10k scrollback lines.
 
 ## Target numbers

@@ -194,6 +194,12 @@ void TestScreen(Harness& h) {
             L"screen: VS16 widens a text-style emoji");
     h.check(heart.cursorX() == 2, L"screen: widened emoji advances two cells");
 
+    vt::Terminal tinted(10, 2, 10);
+    tinted.feed("\xF0\x9F\x91\x8D\xF0\x9F\x8F\xBD");  // thumb + skin tone
+    h.check(tinted.viewCell(0, 0).width == 2 && tinted.viewCell(1, 0).width == 0 &&
+                tinted.cursorX() == 2,
+            L"screen: emoji modifier does not take a cell");
+
     vt::Terminal title(10, 2, 10);
     title.feed("\x1b]0;My Title\x07");
     h.check(title.title() == L"My Title", L"screen: OSC title");

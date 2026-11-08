@@ -573,8 +573,8 @@ void TerminalView::paintGrid(HDC dc, const RECT&) {
         HFONT activeFont = nullptr;
         COLORREF activeColor = CLR_INVALID;
         std::wstring run;
+        std::vector<int> runDx;
         int runX = 0;
-        int runEndX = 0;
         auto flush = [&]() {
             if (run.empty()) {
                 return;
@@ -583,11 +583,17 @@ void TerminalView::paintGrid(HDC dc, const RECT&) {
                 oldFont = SelectObject(dc, activeFont);
             }
             SetTextColor(dc, activeColor);
-            RECT clip{left + runX * cellWidth_, rowTop, left + runEndX * cellWidth_,
-                      rowTop + cellHeight_};
-            ExtTextOutW(dc, clip.left, rowTop + (cellHeight_ - textHeight_) / 2, ETO_CLIPPED, &clip,
-                        run.c_str(), static_cast<UINT>(run.size()), nullptr);
+            // Clip to the whole row, not just this run: glyphs from fallback
+            // fonts (symbols, icons) often overhang their cell, and clipping to
+            // the run box cuts them off at program borders. The explicit
+            // advances keep every character on the cell grid regardless of the
+            // font's own advance.
+            RECT clip{left, rowTop, left + columns_ * cellWidth_, rowTop + cellHeight_};
+            ExtTextOutW(dc, left + runX * cellWidth_, rowTop + (cellHeight_ - textHeight_) / 2,
+                        ETO_CLIPPED, &clip, run.c_str(), static_cast<UINT>(run.size()),
+                        runDx.data());
             run.clear();
+            runDx.clear();
         };
 
         x = 0;
@@ -641,8 +647,12 @@ void TerminalView::paintGrid(HDC dc, const RECT&) {
                     oldFont = nullptr;
                 }
             }
+            const size_t units = wcslen(cell.text);
+            for (size_t unit = 0; unit < units; ++unit) {
+                // Base character advances one cell; combining marks stay put.
+                runDx.push_back(unit == 0 ? cellWidth_ : 0);
+            }
             run.append(cell.text);
-            runEndX = x + 1;
             ++x;
         }
         flush();

@@ -124,7 +124,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests\run-selftest.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File tests\run-bench.ps1
 ```
 
-Measured on this machine: 513 KiB EXE, 18.5 ms to parse and store 10,000 colored
+Measured on this machine: 514 KiB EXE, 18.5 ms to parse and store 10,000 colored
 lines (120x40, 10k scrollback), 5.9 ms for a resize cycle, about 50 MB RSS with
 10k scrollback lines.
 

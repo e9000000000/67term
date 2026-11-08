@@ -163,7 +163,7 @@ Measure with `67t.exe --bench-startup` and the self-test timings:
 
 Do not regress these without updating the plan and recording numbers.
 
-Latest measured release build: 525,312-byte EXE; 10,000 colored lines parsed and
+Latest measured release build: 526,336-byte EXE; 10,000 colored lines parsed and
 stored in 18.5 ms; resize cycle 5.9 ms; ~50 MB RSS with 10k scrollback lines;
 hidden chrome construction under 1 ms.
 
@@ -198,7 +198,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests\run-selftest.ps1
   responses, scrollback trimming, resize, key encoding, mouse/paste encoding,
   Win32 input-mode records, ConPTY spawn + echo + exit, process current
   directory, and a live PowerShell Ctrl+Backspace edit. Results are JSON-ish
-  lines; expect `summary passed=94 failed=0`.
+  lines; expect `summary passed=95 failed=0`.
 - `--bench [lines]`: parser/screen microbenchmarks on synthetic colored output.
 - `--bench-startup`: hidden chrome construction timing and RSS.
 - Manual smoke: PowerShell and cmd tabs, `dir`, `git status`, colors, Unicode,
@@ -249,6 +249,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests\run-selftest.ps1
   (for example after a gap of empty cells). Reusing the previous run's start
   offset draws the text shifted left, which is visible in TUIs such as
   opencode.
+- Runs pass an explicit `lpDx` advance (`cellWidth_`, `0` for combining marks)
+  and clip to the whole row rather than the run box. Fallback fonts for box
+  drawing, symbols and icons have negative side bearings and overhang their
+  cell; clipping to the run used to cut them off at program borders.
 - Win32 input-mode records carry one UTF-16 code unit (`WORD`), not a code
   point. Send surrogate halves separately; combining them and truncating breaks
   emoji input.

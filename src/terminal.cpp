@@ -102,7 +102,8 @@ bool IsCombining(uint32_t cp) {
            (cp >= 0x1DA75 && cp <= 0x1DA75) || (cp >= 0x1DA84 && cp <= 0x1DA84) ||
            (cp >= 0x1DA9B && cp <= 0x1DA9F) || (cp >= 0x1DAA1 && cp <= 0x1DAAF) ||
            (cp >= 0x1E000 && cp <= 0x1E02A) || (cp >= 0x1E8D0 && cp <= 0x1E8D6) ||
-           (cp >= 0x1E944 && cp <= 0x1E94A) || (cp >= 0xE0100 && cp <= 0xE01EF) ||
+           (cp >= 0x1E944 && cp <= 0x1E94A) || (cp >= 0x1F3FB && cp <= 0x1F3FF) ||
+            (cp >= 0xE0020 && cp <= 0xE007F) || (cp >= 0xE0100 && cp <= 0xE01EF) ||
            cp == 0x200B || cp == 0x200C || cp == 0x200D || cp == 0x2060 ||
            cp == 0xFEFF || cp == 0x00AD;
 }
