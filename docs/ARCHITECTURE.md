@@ -1,0 +1,196 @@
+# 67t — Architecture
+
+## Process model
+
+One process owns one window, any number of tabs, and one ConPTY session per tab.
+
+```
+67t.exe
+├─ main window (custom chrome)
+│  ├─ custom tab strip / title row
+│  ├─ custom menu bar
+│  ├─ one terminal child HWND per tab (only active visible)
+│  │  ├─ Terminal (parser + screen + scrollback)
+│  │  └─ PtySession (HPCON, child process, reader thread)
+│  └─ custom status bar
+└─ settings.ini / window placement
+```
+
+Closing a tab destroys its view and closes its pseudo console, which ends the
+shell. There is no daemon, no network listener, and no cross-process handoff.
+
+## Why ConPTY
+
+`CreatePseudoConsole` is the only supported way to host a real Windows console
+program in a GUI. The shell sees a genuine console: it gets a window size, VT
+input, and VT output. We never scrape redirected `cmd` output.
+
+ConPTY is available from Windows 10 1809. The app loads its exports from
+`kernel32.dll` at startup so an older OS fails with a clear error instead of a
+load-time failure.
+
+## PTY session
+
+`PtySession::start`:
+
+1. `CreatePipe` for input and output with inheritable ConPTY-side ends only.
+2. `CreatePseudoConsole({cols, rows}, ptyInputRead, ptyOutputWrite, 0, &hpc)`.
+3. Close the two ConPTY-side handles in the parent.
+4. Build a UTF-8/UTF-16 environment block that includes `TERM=xterm-256color`
+   and `COLORTERM=truecolor`.
+5. `CreateProcessW` the shell with
+   `PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE` and
+   `EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT`.
+6. Start a reader thread on the output pipe.
+
+The reader thread reads 16 KiB at a time into a mutex-protected backlog and calls
+`PostMessage` once when the backlog transitions from empty to non-empty. The UI
+thread drains the backlog on `WM_APP_PTY_DATA`, feeds the parser, and re-posts if
+more remains.
+
+Backlog is bounded (8 MiB). If a shell floods output faster than the UI can draw,
+the reader blocks on the pipe once the cap is reached, which applies natural
+backpressure to the child.
+
+`write` encodes UTF-8 bytes and `WriteFile`s them to the input pipe on the UI
+thread (small writes; a paste is written in one call). `resize` calls
+`ResizePseudoConsole` only when the grid size actually changes.
+
+Shutdown order: `TerminateProcess` if the child is still alive, close the
+pseudo console, close pipes, join the reader, close handles. `ClosePseudoConsole`
+is never called from the reader thread.
+
+## Terminal engine
+
+`terminal.h` has no Win32 dependency, which makes it testable headless.
+
+```cpp
+struct Cell {
+    wchar_t text[4];   // base char or surrogate pair + combining marks
+    uint8_t width;     // 0 continuation, 1 narrow, 2 wide
+    uint16_t attrs;    // bold, dim, italic, underline, blink, inverse, ...
+    Color fg, bg;      // default / indexed / RGB
+};
+
+struct Line { std::vector<Cell> cells; };
+```
+
+State:
+
+- main screen and alternate screen grids
+- scrollback `std::deque<Line>` (main screen only)
+- cursor position, deferred-wrap flag, cursor style/visibility
+- saved cursor (DECSC)
+- current pen: attrs + fg/bg
+- scroll region (DECSTBM), origin mode, autowrap, insert mode
+- tab stops
+- private modes: cursor keys, keypad, bracketed paste, focus, mouse (1000/1002/
+  1003), SGR mouse (1006), alt screen (47/1047/1049), reverse video (5)
+- title (OSC 0/1/2), working directory (OSC 7), clipboard callback (OSC 52)
+- response callback for DA, DSR, window-size reports, DECRQM
+
+Parser is an incremental state machine:
+
+```
+Ground --ESC--> Escape --[--> Csi --> final dispatch
+                  |--]--> Osc --> BEL/ST
+                  |--P--> Dcs (ignored to ST)
+                  |--( ) * +--> Charset (consumed)
+```
+
+CSI parameters and intermediates are collected as raw ASCII and parsed at final
+dispatch, so split reads and unusual orders are handled without allocating per
+byte. OSC strings are capped at 8 KiB. UTF-8 decoding keeps partial-sequence
+state across `feed()` calls; malformed bytes become U+FFFD.
+
+Cell semantics follow xterm: wide characters occupy two cells (second is a
+continuation), combining marks append to the preceding cell, deferred wrap waits
+for the next printable character, and erase operations clear both halves of a
+wide cell.
+
+Scrolling the full main screen pushes the top line to scrollback; scrolling a
+smaller DECSTBM region does not. Scrollback is trimmed from the front; if the
+user is scrolled up when lines are trimmed, the viewport offset is adjusted.
+
+## Renderer
+
+`TerminalView` is a child HWND that paints with GDI into a double buffer.
+
+- Monospaced font: Cascadia Mono if present, else Consolas. Regular/bold/
+  italic/bold-italic faces, recreated on DPI or zoom change.
+- Cell metrics come from `GetTextExtentPoint32W(L"M")` and `TEXTMETRIC`.
+- Backgrounds are filled in contiguous runs; text is emitted in runs sharing
+  foreground and attributes, falling back to single cells around wide glyphs.
+- Underline and strikethrough are drawn as 1-pixel lines; inverse swaps colors;
+  invisible skips glyph drawing; blink is honored at render time.
+- 16 ANSI colors, a 256-color cube, and 24-bit RGB are supported. Default
+  foreground/background come from `theme.h`.
+- Cursor: block, underline, or bar; optional blink; drawn only when focused and
+  scrolled to the bottom.
+- Selection: click-drag, double-click word, triple-click line; highlight and
+  copy with trailing spaces trimmed. Ctrl+Shift+C / Ctrl+Shift+V, plus the menu.
+- Scrollback: mouse wheel, Shift+wheel, PageUp/PageDown, Shift+Home/End;
+  an overlay scrollbar on the right; any keystroke returns to the bottom.
+- Mouse reporting: when the app enables 1000/1002/1003, mouse events are encoded
+  as SGR (1006) sequences and sent to the PTY. Shift overrides to local selection.
+- IME: `WM_IME_COMPOSITION` result strings are sent to the PTY; the composition
+  window is positioned at the cursor.
+
+Focus changes send `ESC[I` / `ESC[O` when mode 1004 is enabled.
+
+## Input encoding
+
+`view.cpp` maps Win32 keys to xterm sequences:
+
+- printable text and control characters from `WM_CHAR`, encoded UTF-8
+- arrows/Home/End in normal or application-cursor mode (`ESC[A` vs `SS3 A`)
+- Insert/Delete/PgUp/PgDn/F1–F12, with xterm modifier parameters
+- Alt as an ESC prefix (Alt+letter)
+- Ctrl+Shift shortcuts reserved for the app; everything else, including Ctrl+C,
+  Ctrl+D, Ctrl+Z, reaches the shell
+- paste normalizes CRLF to CR and honors bracketed paste mode
+- resize recomputes the grid and calls `ResizePseudoConsole`
+
+## UI chrome
+
+Reuses the 67ed visual language exactly:
+
+- Title/tab row (`kTabHeight` 28), menu bar (28), status bar (24)
+- `theme::kBg` background, `kPanel` chrome, `kBorder` separators,
+  `kText`/`kTextDim`/`kTextFaint`, one `kAccent`
+- Custom-drawn tabs full width with `+`, close buttons, drag reorder,
+  middle-click close
+- Custom owner-drawn dark popup menus
+- `WM_NCCALCSIZE` removes the caption while keeping the resize frame;
+  `WM_NCHITTEST` makes the tab/menu strip draggable
+- DWM immersive dark mode on a best-effort basis
+- All metrics scaled with the window DPI; fonts recreated on DPI change
+
+## Settings and persistence
+
+Data directory is `%APPDATA%\67t\`, or `.\state\` in portable mode when
+`67t.ini` sits next to the executable.
+
+`settings.ini` keys:
+
+```
+font=Cascadia Mono
+fontSize=16
+shell=powershell.exe -NoLogo
+scrollback=10000
+cursorBlink=1
+window=left,top,width,height,maximized
+```
+
+Writes are temp-file + `MoveFileExW` replacements. A corrupt or unreadable file
+falls back to defaults without blocking startup.
+
+## Testing
+
+- `--selftest`: no visible window. Covers CLI, UTF-8, parser chunking, cursor,
+  SGR, erase/edit commands, scroll region, alt screen, tab stops, wide chars,
+  OSC title, response generation, scrollback, resize, key encoding, mouse
+  encoding, paste, and a real ConPTY spawn/echo/exit check.
+- `--bench`: parser/screen throughput on synthetic output.
+- `--bench-startup`: hidden chrome construction timing and RSS.
+- Test runner: `tests/run-selftest.ps1`.

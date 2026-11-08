@@ -1,0 +1,96 @@
+# 67t
+
+[![Build](https://github.com/e9000000000/67t/actions/workflows/build.yml/badge.svg)](https://github.com/e9000000000/67t/actions/workflows/build.yml)
+
+A native Windows terminal emulator: dark, tabbed, small, and powered by a real
+ConPTY shell. Same visual language as [67ed](../67ed).
+
+- Native Win32 + GDI + ConPTY, C++20, static build — one `.exe`
+- Dark chrome: compact title/tab row with integrated minimize/maximize/close
+- Real PowerShell / cmd / any console program, UTF-8 VT input and output
+- Tabs with drag reorder, close buttons, OSC titles
+- 10,000-line scrollback (configurable), wheel and keyboard scrolling
+- 16/256/24-bit color, bold/italic/underline/strike, cursor styles
+- Selection, copy/paste, bracketed paste, mouse reporting, IME input
+- UTF-8 and wide characters, alternate screen, scroll regions, DEC private modes
+- Resize reflows the ConPTY grid; close a tab and its shell is terminated
+- Remembers window placement, font size, scrollback, and cursor blink
+
+## Build
+
+Requires Visual Studio Build Tools (MSVC), the Windows 10/11 SDK, and Windows 10
+1809+ for ConPTY.
+
+```powershell
+.\build.bat
+.\build\67t.exe
+```
+
+Debug build: `.\build.bat debug`. Clean: `.\build.bat clean`.
+
+## Usage
+
+```powershell
+build\67t.exe                       # default shell (pwsh, powershell, or cmd)
+build\67t.exe --shell cmd.exe
+build\67t.exe --cwd C:\src
+build\67t.exe C:\src                # a directory argument sets the start dir
+```
+
+## Shortcuts
+
+| Action | Shortcut |
+|---|---|
+| New tab | `Ctrl+Shift+T` |
+| New window | `Ctrl+Shift+N` |
+| Close tab | `Ctrl+Shift+W` |
+| Restart shell | `Ctrl+Shift+R` |
+| Copy / paste | `Ctrl+Shift+C` / `Ctrl+Shift+V` |
+| Select all | `Ctrl+Shift+A` |
+| Clear scrollback | `Ctrl+Shift+K` |
+| Next / previous tab | `Ctrl+Tab` / `Ctrl+Shift+Tab` |
+| Go to tab 1–9 | `Ctrl+1` … `Ctrl+9` |
+| Zoom in / out / reset | `Ctrl++` / `Ctrl+-` / `Ctrl+0` |
+| Full screen | `F11` or `Alt+Enter` |
+| Scroll back / forward | wheel, `Shift+PageUp` / `Shift+PageDown` |
+| Scroll to top / bottom | `Ctrl+Shift+Home` / `Ctrl+Shift+End` |
+
+`Ctrl+C`, `Ctrl+D`, `Ctrl+Z`, arrows, function keys, and the rest of the normal
+keyboard go to the shell.
+
+## Settings
+
+Settings live in `%APPDATA%\67t\settings.ini` (or `.\state\settings.ini` when
+`67t.ini` sits next to the executable):
+
+```ini
+[67t]
+font=Cascadia Mono
+fontSize=16
+shell=powershell.exe -NoLogo
+scrollback=10000
+cursorBlink=1
+```
+
+## Status
+
+Under construction, but usable as a daily terminal. See
+[`docs/PLAN.md`](docs/PLAN.md) for milestones and
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the design.
+
+Automated checks:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tests\run-selftest.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File tests\run-bench.ps1
+```
+
+Measured on this machine: 450 KiB EXE, 24.2 ms to parse and store 10,000 colored
+lines (120x40, 10k scrollback), 5.3 ms for a resize cycle, about 50 MB RSS with
+10k scrollback lines.
+
+## Not there yet
+
+Scrollback search, split panes, OSC 8 hyperlinks, shell-integration marks, and
+restoring tabs across restarts. 67t is not affiliated with Windows Terminal,
+PowerShell, or Notepad.
