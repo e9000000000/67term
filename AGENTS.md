@@ -47,8 +47,10 @@ integration still inherit the directory.
 
 Unicode: astral characters are stored as surrogate pairs in one wide cell,
 emoji-presentation code points are width 2, and VS16 (`U+FE0F`) promotes
-text-style symbols to wide emoji. Win32 input records send UTF-16 code units so
-typed emoji reach the console intact.
+text-style symbols to wide emoji. Astral input is sent as UTF-8 text instead of
+Win32 key records, because a record only holds one UTF-16 code unit. Windows
+PowerShell 5.1 deletes one code unit per Backspace and leaves `U+FFFD`; the view
+detects that replacement glyph and sends one follow-up Backspace.
 
 Known gaps: scrollback search, split panes, OSC 8 hyperlinks, shell-integration
 marks, and restoring tabs across restarts. Read `docs/PLAN.md` for milestones and
@@ -163,7 +165,7 @@ Measure with `67t.exe --bench-startup` and the self-test timings:
 
 Do not regress these without updating the plan and recording numbers.
 
-Latest measured release build: 526,336-byte EXE; 10,000 colored lines parsed and
+Latest measured release build: 531,456-byte EXE; 10,000 colored lines parsed and
 stored in 18.5 ms; resize cycle 5.9 ms; ~50 MB RSS with 10k scrollback lines;
 hidden chrome construction under 1 ms.
 
@@ -197,8 +199,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests\run-selftest.ps1
   stops, wide characters, emoji width and VS16 promotion, OSC titles, DA/DSR
   responses, scrollback trimming, resize, key encoding, mouse/paste encoding,
   Win32 input-mode records, ConPTY spawn + echo + exit, process current
-  directory, and a live PowerShell Ctrl+Backspace edit. Results are JSON-ish
-  lines; expect `summary passed=95 failed=0`.
+  directory, live PowerShell Ctrl+Backspace editing, and emoji input plus the
+  replacement-glyph cleanup. Results are JSON-ish lines; expect
+  `summary passed=98 failed=0`.
 - `--bench [lines]`: parser/screen microbenchmarks on synthetic colored output.
 - `--bench-startup`: hidden chrome construction timing and RSS.
 - Manual smoke: PowerShell and cmd tabs, `dir`, `git status`, colors, Unicode,
@@ -254,8 +257,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests\run-selftest.ps1
   drawing, symbols and icons have negative side bearings and overhang their
   cell; clipping to the run used to cut them off at program borders.
 - Win32 input-mode records carry one UTF-16 code unit (`WORD`), not a code
-  point. Send surrogate halves separately; combining them and truncating breaks
-  emoji input.
+  point. Send astral characters as UTF-8 text instead of records; surrogate
+  halves sent as records are dropped by console hosts.
+- Windows PowerShell 5.1 (PSReadLine) removes one UTF-16 unit per Backspace, so
+  deleting half of an emoji leaves a lone surrogate rendered as `U+FFFD`. The
+  view arms a check when Backspace follows an astral cell and, if `U+FFFD`
+  appears there within ~1.5 s, sends one more `0x7F`. Do not blindly send a
+  double Backspace: apps that delete a whole code point would lose an extra
+  character.
 - Zero-width marks must attach to the wide *lead* cell, not its continuation
   cell. VS16 (`U+FE0F`) promotes a text-style symbol to a two-cell emoji.
 - `ProcessCurrentDirectory` reads `RTL_USER_PROCESS_PARAMETERS` through the

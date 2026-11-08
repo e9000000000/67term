@@ -424,6 +424,25 @@ void TestPty(Harness& h) {
     }
 }
 
+std::wstring RowText(const vt::Terminal& terminal, int y) {
+    std::wstring row;
+    for (int x = 0; x < terminal.columns(); ++x) {
+        const vt::Cell& cell = terminal.viewCell(x, y);
+        if (cell.width == 0) {
+            continue;
+        }
+        if (cell.text[0] == 0) {
+            row.push_back(L' ');
+        } else {
+            row.append(cell.text);
+        }
+    }
+    while (!row.empty() && row.back() == L' ') {
+        row.pop_back();
+    }
+    return row;
+}
+
 void TestWin32Input(Harness& h) {
     if (!PtySession::available()) {
         return;
@@ -522,6 +541,51 @@ void TestWin32Input(Harness& h) {
             L"win32 input: Ctrl+Backspace works with an empty Unicode field",
             screen.substr(0, 240));
     h.check(screen.find(L"two") == std::wstring::npos, L"win32 input: second word is gone");
+
+    const auto describe = [](const std::wstring& value) {
+        std::wstring out;
+        for (const wchar_t ch : value) {
+            if (ch >= 0x20 && ch < 0x7F) {
+                out += ch;
+            } else {
+                wchar_t buffer[16]{};
+                swprintf_s(buffer, L"<%04X>", static_cast<unsigned>(static_cast<unsigned short>(ch)));
+                out += buffer;
+            }
+        }
+        return out;
+    };
+
+    // Astral characters are sent as UTF-8 text (the WM_CHAR path does this).
+    key(VK_ESCAPE, 27, false);
+    Sleep(200);
+    session.write("\xF0\x9F\x9A\x80");  // rocket
+    Sleep(500);
+    pump();
+    std::wstring row = RowText(terminal, terminal.cursorY());
+    h.check(row.find(L"\xD83D\xDE80") != std::wstring::npos,
+            L"win32 input: emoji reaches the shell", describe(row));
+
+    // Windows PowerShell 5.1 removes one UTF-16 unit, leaving U+FFFD. The view
+    // detects that and sends a follow-up Backspace; check the same sequence.
+    const int backScan = static_cast<int>(MapVirtualKeyW(VK_BACK, MAPVK_VK_TO_VSC));
+    session.write(input::EncodeWin32Key(VK_BACK, backScan, 8, true, 0, 1));
+    session.write(input::EncodeWin32Key(VK_BACK, backScan, 0, false, 0, 1));
+    Sleep(600);
+    pump();
+    row = RowText(terminal, terminal.cursorY());
+    h.check(row.find(L"\xD83D") == std::wstring::npos,
+            L"win32 input: Backspace removes the emoji code unit", describe(row));
+    if (row.find(L"\xFFFD") != std::wstring::npos) {
+        session.write("\x7F");
+        Sleep(600);
+        pump();
+        row = RowText(terminal, terminal.cursorY());
+        h.check(row.find(L"\xFFFD") == std::wstring::npos,
+                L"win32 input: follow-up Backspace clears the replacement glyph",
+                describe(row));
+    }
+
     session.close();
 }
 

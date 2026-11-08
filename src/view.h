@@ -96,6 +96,9 @@ private:
     void onSessionExit();
     void installCallbacks();
     void prepareForSession(const std::wstring& titleHint);
+    void armAstralBackspace();
+    void checkAstralBackspace();
+    void sendExtraBackspace();
     void paint(HDC target);
     void paintGrid(HDC dc, const RECT& client);
     void paintCursor(HDC dc);
@@ -192,6 +195,14 @@ private:
     bool suppressNextChar_ = false;
     bool searchActive_ = false;
 
+    // Some shells (Windows PowerShell 5.1) delete one UTF-16 code unit per
+    // Backspace, leaving a lone surrogate as U+FFFD after an astral character.
+    // Track that case and send one follow-up Backspace only if it appears.
+    bool astralBackspaceArmed_ = false;
+    int astralBackspaceX_ = -1;
+    int astralBackspaceY_ = -1;
+    ULONGLONG astralBackspaceDeadline_ = 0;
+
     struct PendingWin32Key {
         bool active = false;
         WPARAM vk = 0;
@@ -200,6 +211,5 @@ private:
         int repeat = 1;
     };
     PendingWin32Key pendingWin32Key_;
-    PendingWin32Key pendingSurrogateKey_;
     bool win32KeySent_[256]{};
 };

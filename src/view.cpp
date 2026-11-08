@@ -291,7 +291,7 @@ void TerminalView::prepareForSession(const std::wstring& titleHint) {
     selecting_ = false;
     pendingHighSurrogate_ = 0;
     pendingWin32Key_.active = false;
-    pendingSurrogateKey_.active = false;
+    astralBackspaceArmed_ = false;
     std::memset(win32KeySent_, 0, sizeof(win32KeySent_));
     terminal_.setScrollbackLimit(scrollbackLimit_);
     terminal_.reset(true);
@@ -403,6 +403,52 @@ void TerminalView::closeSession() {
     exited_ = true;
 }
 
+void TerminalView::armAstralBackspace() {
+    astralBackspaceArmed_ = false;
+    if (terminal_.scrollOffset() != 0) {
+        return;
+    }
+    int x = terminal_.cursorX() - 1;
+    const int y = terminal_.cursorY();
+    if (x < 0 || y < 0) {
+        return;
+    }
+    // After a wide character the cursor sits past its continuation cell.
+    if (terminal_.viewCell(x, y).width == 0 && x > 0) {
+        --x;
+    }
+    const vt::Cell& lead = terminal_.viewCell(x, y);
+    const wchar_t hi = lead.text[0];
+    const wchar_t lo = lead.text[1];
+    if (lead.width == 2 && hi >= 0xD800 && hi <= 0xDBFF && lo >= 0xDC00 && lo <= 0xDFFF) {
+        astralBackspaceArmed_ = true;
+        astralBackspaceX_ = x;
+        astralBackspaceY_ = y;
+        astralBackspaceDeadline_ = GetTickCount64() + 1500;
+    }
+}
+
+void TerminalView::checkAstralBackspace() {
+    if (!astralBackspaceArmed_) {
+        return;
+    }
+    if (GetTickCount64() > astralBackspaceDeadline_) {
+        astralBackspaceArmed_ = false;
+        return;
+    }
+    const vt::Cell& cell = terminal_.viewCell(astralBackspaceX_, astralBackspaceY_);
+    if (cell.width != 0 && cell.text[0] == 0xFFFD && cell.text[1] == 0) {
+        // The shell removed only half of the surrogate pair and drew a
+        // replacement glyph; delete the remaining half.
+        astralBackspaceArmed_ = false;
+        sendExtraBackspace();
+    }
+}
+
+void TerminalView::sendExtraBackspace() {
+    sendText("\x7f");
+}
+
 std::wstring TerminalView::workingDirectory() const {
     const std::wstring& reported = terminal_.workingDirectory();
     if (!reported.empty()) {
@@ -417,6 +463,7 @@ void TerminalView::feedFromSession() {
         return;
     }
     terminal_.feed(data);
+    checkAstralBackspace();
     invalidate();
 }
 
@@ -1279,7 +1326,6 @@ LRESULT TerminalView::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) 
             return 0;
         }
         pendingWin32Key_.active = false;
-        pendingSurrogateKey_.active = false;
         std::memset(win32KeySent_, 0, sizeof(win32KeySent_));
         switch (wParam) {
         case VK_SHIFT:
@@ -1306,6 +1352,9 @@ LRESULT TerminalView::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) 
                 sendText("\x1b\x7f");
                 suppressNextChar_ = true;
                 return 0;
+            }
+            if (!ctrl) {
+                armAstralBackspace();
             }
             break;
         default:
@@ -1383,32 +1432,38 @@ LRESULT TerminalView::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) 
         if (terminal_.win32InputMode()) {
             const wchar_t ch = static_cast<wchar_t>(wParam);
             if (pendingWin32Key_.active) {
+                if (ch >= 0xD800 && ch <= 0xDBFF) {
+                    // Astral characters go out as UTF-8 text instead of Win32
+                    // records: a record carries one UTF-16 unit, and consoles
+                    // do not reliably reassemble pairs from surrogate halves.
+                    // The trailing half arrives in the next WM_CHAR.
+                    pendingHighSurrogate_ = ch;
+                    pendingWin32Key_.active = false;
+                    return 0;
+                }
+                if (ch >= 0xDC00 && ch <= 0xDFFF && pendingHighSurrogate_) {
+                    const wchar_t pair[2] = {pendingHighSurrogate_, ch};
+                    pendingHighSurrogate_ = 0;
+                    pendingWin32Key_.active = false;
+                    sendUtf16(std::wstring_view(pair, 2));
+                    return 0;
+                }
                 int unicode = ch;
                 if (pendingWin32Key_.vk == VK_BACK) {
                     unicode = 8;
+                    if ((GetKeyState(VK_CONTROL) & 0x8000) == 0) {
+                        armAstralBackspace();
+                    }
                 }
-                // The Win32 input record carries one UTF-16 code unit, not a
-                // code point. Send surrogate halves separately so emoji arrive
-                // intact instead of truncated.
                 sendWin32KeyRecord(pendingWin32Key_.vk, pendingWin32Key_.lParam, true,
                                    static_cast<int>(static_cast<uint16_t>(unicode)),
                                    pendingWin32Key_.repeat);
-                if (ch >= 0xD800 && ch <= 0xDBFF) {
-                    // The trailing half arrives as another WM_CHAR.
-                    pendingSurrogateKey_ = pendingWin32Key_;
-                }
                 pendingWin32Key_.active = false;
                 return 0;
             }
-            if (ch >= 0xDC00 && ch <= 0xDFFF && pendingSurrogateKey_.active) {
-                sendWin32KeyRecord(pendingSurrogateKey_.vk, pendingSurrogateKey_.lParam, true,
-                                   static_cast<int>(ch), pendingSurrogateKey_.repeat);
-                pendingSurrogateKey_.active = false;
-                return 0;
-            }
-            pendingHighSurrogate_ = 0;
-            pendingSurrogateKey_.active = false;
-            // Dead-key composition or IME text with no pending key: send text directly.
+            // Dead-key composition or IME text with no pending key: send text
+            // directly. A pending high surrogate stays set for the trailing
+            // half of an astral character.
         }
         if (suppressNextChar_) {
             suppressNextChar_ = false;

@@ -10,7 +10,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests\run-startup.ps1
 ```
 
 The self-test creates no visible window. It writes `build\selftest.log` and exits
-non-zero on a failure. Current check count: **95** (`summary passed=95 failed=0`).
+non-zero on a failure. Current check count: **98** (`summary passed=98 failed=0`).
 
 Coverage:
 
@@ -26,7 +26,8 @@ Coverage:
 - SGR/legacy mouse encoding and paste newline normalization
 - real ConPTY: spawn, output, `TERM` environment, resize, child exit
 - process current directory read from a live shell's PEB
-- live PowerShell: Win32 input mode and Ctrl+Backspace word deletion
+- live PowerShell: Win32 input mode, Ctrl+Backspace, emoji input and the
+  replacement-glyph follow-up Backspace
 - hidden chrome construction timing
 
 The PTY checks start `cmd.exe` inside a real pseudo console; no shell output is
@@ -44,7 +45,7 @@ Reference numbers (this machine, release build):
 
 | Metric | Value |
 |---|---|
-| EXE | 526,336 bytes |
+| EXE | 531,456 bytes |
 | 10,000 lines parse + store | 18.5 ms |
 | Resize cycle (100x30 → 140x45 → 120x40) | 5.9 ms |
 | RSS with 10k scrollback lines | ~50 MB |
