@@ -128,6 +128,9 @@ void TestUnicode(Harness& h) {
     h.check(vt::codePointWidth(0x41) == 1, L"width: ASCII");
     h.check(vt::codePointWidth(0x4E16) == 2, L"width: CJK wide");
     h.check(vt::codePointWidth(0x0301) == 0, L"width: combining");
+    h.check(vt::codePointWidth(0x1F680) == 2, L"width: rocket emoji wide");
+    h.check(vt::codePointWidth(0x2705) == 2, L"width: check mark emoji wide");
+    h.check(vt::codePointWidth(0x2764) == 1, L"width: heart narrow without VS16");
 }
 
 void TestScreen(Harness& h) {
@@ -168,6 +171,28 @@ void TestScreen(Harness& h) {
     h.check(wide.viewCell(0, 0).width == 2, L"screen: wide lead");
     h.check(wide.viewCell(1, 0).width == 0, L"screen: wide continuation");
     h.check(CellText(wide, 2, 0) == L"X", L"screen: wide advances two cells");
+
+    vt::Terminal emoji(10, 2, 10);
+    emoji.feed("\xF0\x9F\x9A\x80");  // U+1F680 rocket
+    h.check(emoji.viewCell(0, 0).width == 2 && emoji.viewCell(1, 0).width == 0,
+            L"screen: emoji is one wide cell");
+    h.check(emoji.viewCell(0, 0).text[0] == 0xD83D && emoji.viewCell(0, 0).text[1] == 0xDE80,
+            L"screen: emoji stored as a surrogate pair");
+    h.check(emoji.cursorX() == 2, L"screen: emoji advances two cells");
+
+    emoji.feed("\xEF\xB8\x8F");  // VS16
+    const std::wstring lead = CellText(emoji, 0, 0);
+    h.check(lead.size() == 3 && lead[0] == 0xD83D && lead[1] == 0xDE80 && lead[2] == 0xFE0F,
+            L"screen: VS16 attaches to the emoji lead cell");
+    h.check(CellText(emoji, 1, 0).empty() && emoji.viewCell(1, 0).width == 0,
+            L"screen: VS16 leaves the continuation cell empty");
+    h.check(emoji.cursorX() == 2, L"screen: VS16 keeps the wide advance");
+
+    vt::Terminal heart(10, 2, 10);
+    heart.feed("\xE2\x9D\xA4\xEF\xB8\x8F");  // U+2764 heart + VS16
+    h.check(heart.viewCell(0, 0).width == 2 && heart.viewCell(1, 0).width == 0,
+            L"screen: VS16 widens a text-style emoji");
+    h.check(heart.cursorX() == 2, L"screen: widened emoji advances two cells");
 
     vt::Terminal title(10, 2, 10);
     title.feed("\x1b]0;My Title\x07");
@@ -372,6 +397,24 @@ void TestPty(Harness& h) {
         resize.close();
     } else {
         h.check(false, L"pty: resize session start", error);
+    }
+
+    PtySession cwdSession;
+    error.clear();
+    if (cwdSession.start(L"cmd.exe /d /k", ExeDirectory(), 60, 20, nullptr, error)) {
+        std::wstring directory;
+        const ULONGLONG cwdDeadline = GetTickCount64() + 3000;
+        while (GetTickCount64() < cwdDeadline && directory.empty()) {
+            directory = ProcessCurrentDirectory(cwdSession.processId());
+            if (directory.empty()) {
+                Sleep(20);
+            }
+        }
+        h.check(!directory.empty() && PathsEqual(directory, ExeDirectory()),
+                L"pty: process current directory", directory);
+        cwdSession.close();
+    } else {
+        h.check(false, L"pty: cwd session start", error);
     }
 }
 

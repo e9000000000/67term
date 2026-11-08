@@ -16,6 +16,7 @@ Coverage:
 
 - CLI option parsing and unknown-option errors
 - UTF-8 encode/decode, wide and combining character widths
+- emoji (astral) cells, VS16 promotion, zero-width marks on wide lead cells
 - screen print, CR/LF, CUP, erase, SGR indexed/truecolor/attributes, wide cells
 - OSC title, OSC 7 directory, device attributes, cursor position report
 - bracketed paste, application cursor keys, mouse modes, alternate screen
@@ -24,6 +25,7 @@ Coverage:
 - key encoding (arrows, modifiers, function keys, Shift+Tab), Win32 input records
 - SGR/legacy mouse encoding and paste newline normalization
 - real ConPTY: spawn, output, `TERM` environment, resize, child exit
+- process current directory read from a live shell's PEB
 - live PowerShell: Win32 input mode and Ctrl+Backspace word deletion
 - hidden chrome construction timing
 
@@ -42,7 +44,7 @@ Reference numbers (this machine, release build):
 
 | Metric | Value |
 |---|---|
-| EXE | 513,024 bytes |
+| EXE | 525,312 bytes |
 | 10,000 lines parse + store | 18.5 ms |
 | Resize cycle (100x30 → 140x45 → 120x40) | 5.9 ms |
 | RSS with 10k scrollback lines | ~50 MB |
@@ -68,6 +70,12 @@ Reference numbers (this machine, release build):
   running window. `67t.exe --cwd C:\Windows` opens the tab there, and
   `--shell cmd.exe` starts cmd in that tab. `--new-window` creates a second
   window instead. Close every window and launch again: a fresh primary starts.
+- In a tab, `cd C:\Windows`, then use the plus button, `Ctrl+Shift+T`, and
+  Duplicate Tab: each new tab must start in `C:\Windows` (this works without
+  OSC 7 shell integration).
+- Print or paste emoji (`🚀`, `✅`, `❤️`) and press Backspace: the emoji must
+  render as one wide glyph, not two, and must disappear without leaving a
+  replacement square.
 - Default terminal: burger menu → **Make 67t the Default Terminal**, then launch
   `cmd.exe` from the Run dialog. It must open in a 67t tab (title `cmd`), show the
   prompt, echo typed commands, and close without leaving a 67t process behind.

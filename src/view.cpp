@@ -291,6 +291,7 @@ void TerminalView::prepareForSession(const std::wstring& titleHint) {
     selecting_ = false;
     pendingHighSurrogate_ = 0;
     pendingWin32Key_.active = false;
+    pendingSurrogateKey_.active = false;
     std::memset(win32KeySent_, 0, sizeof(win32KeySent_));
     terminal_.setScrollbackLimit(scrollbackLimit_);
     terminal_.reset(true);
@@ -400,6 +401,14 @@ void TerminalView::closeSession() {
     session_.close();
     starting_ = false;
     exited_ = true;
+}
+
+std::wstring TerminalView::workingDirectory() const {
+    const std::wstring& reported = terminal_.workingDirectory();
+    if (!reported.empty()) {
+        return reported;
+    }
+    return ProcessCurrentDirectory(session_.processId());
 }
 
 void TerminalView::feedFromSession() {
@@ -1260,6 +1269,7 @@ LRESULT TerminalView::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) 
             return 0;
         }
         pendingWin32Key_.active = false;
+        pendingSurrogateKey_.active = false;
         std::memset(win32KeySent_, 0, sizeof(win32KeySent_));
         switch (wParam) {
         case VK_SHIFT:
@@ -1363,27 +1373,31 @@ LRESULT TerminalView::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) 
         if (terminal_.win32InputMode()) {
             const wchar_t ch = static_cast<wchar_t>(wParam);
             if (pendingWin32Key_.active) {
-                if (ch >= 0xD800 && ch <= 0xDBFF) {
-                    pendingHighSurrogate_ = ch;
-                    return 0;
-                }
                 int unicode = ch;
                 if (pendingWin32Key_.vk == VK_BACK) {
                     unicode = 8;
                 }
-                if (ch >= 0xDC00 && ch <= 0xDFFF && pendingHighSurrogate_) {
-                    const uint32_t value =
-                        0x10000 + ((static_cast<uint32_t>(pendingHighSurrogate_) - 0xD800) << 10) +
-                        (static_cast<uint32_t>(ch) - 0xDC00);
-                    unicode = static_cast<int>(value);
-                    pendingHighSurrogate_ = 0;
-                }
-                sendWin32KeyRecord(pendingWin32Key_.vk, pendingWin32Key_.lParam, true, unicode,
+                // The Win32 input record carries one UTF-16 code unit, not a
+                // code point. Send surrogate halves separately so emoji arrive
+                // intact instead of truncated.
+                sendWin32KeyRecord(pendingWin32Key_.vk, pendingWin32Key_.lParam, true,
+                                   static_cast<int>(static_cast<uint16_t>(unicode)),
                                    pendingWin32Key_.repeat);
+                if (ch >= 0xD800 && ch <= 0xDBFF) {
+                    // The trailing half arrives as another WM_CHAR.
+                    pendingSurrogateKey_ = pendingWin32Key_;
+                }
                 pendingWin32Key_.active = false;
                 return 0;
             }
+            if (ch >= 0xDC00 && ch <= 0xDFFF && pendingSurrogateKey_.active) {
+                sendWin32KeyRecord(pendingSurrogateKey_.vk, pendingSurrogateKey_.lParam, true,
+                                   static_cast<int>(ch), pendingSurrogateKey_.repeat);
+                pendingSurrogateKey_.active = false;
+                return 0;
+            }
             pendingHighSurrogate_ = 0;
+            pendingSurrogateKey_.active = false;
             // Dead-key composition or IME text with no pending key: send text directly.
         }
         if (suppressNextChar_) {

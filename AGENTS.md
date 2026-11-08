@@ -40,6 +40,16 @@ and opens a new tab there (honoring `--cwd` and `--shell`). `--new-window`
 opts out and starts a second window; delegated default-terminal sessions are
 always their own window.
 
+New tabs (the plus button, `Ctrl+Shift+T`, and Duplicate Tab) start in the
+active tab's directory. OSC 7 is used when the shell reports it; otherwise the
+shell process's current directory is read from its PEB, so shells without
+integration still inherit the directory.
+
+Unicode: astral characters are stored as surrogate pairs in one wide cell,
+emoji-presentation code points are width 2, and VS16 (`U+FE0F`) promotes
+text-style symbols to wide emoji. Win32 input records send UTF-16 code units so
+typed emoji reach the console intact.
+
 Known gaps: scrollback search, split panes, OSC 8 hyperlinks, shell-integration
 marks, and restoring tabs across restarts. Read `docs/PLAN.md` for milestones and
 `docs/ARCHITECTURE.md` for the design.
@@ -153,7 +163,7 @@ Measure with `67t.exe --bench-startup` and the self-test timings:
 
 Do not regress these without updating the plan and recording numbers.
 
-Latest measured release build: 513,024-byte EXE; 10,000 colored lines parsed and
+Latest measured release build: 525,312-byte EXE; 10,000 colored lines parsed and
 stored in 18.5 ms; resize cycle 5.9 ms; ~50 MB RSS with 10k scrollback lines;
 hidden chrome construction under 1 ms.
 
@@ -184,10 +194,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests\run-selftest.ps1
 
 - `--selftest`: CLI parsing, UTF-8, VT parser across chunk boundaries, cursor
   movement, SGR colors, erase/insert/delete, scroll regions, alt screen, tab
-  stops, wide characters, OSC titles, DA/DSR responses, scrollback trimming,
-  resize, key encoding, mouse/paste encoding, Win32 input-mode records,
-  ConPTY spawn + echo + exit, and a live PowerShell Ctrl+Backspace edit.
-  Results are JSON-ish lines; expect `summary passed=82 failed=0`.
+  stops, wide characters, emoji width and VS16 promotion, OSC titles, DA/DSR
+  responses, scrollback trimming, resize, key encoding, mouse/paste encoding,
+  Win32 input-mode records, ConPTY spawn + echo + exit, process current
+  directory, and a live PowerShell Ctrl+Backspace edit. Results are JSON-ish
+  lines; expect `summary passed=94 failed=0`.
 - `--bench [lines]`: parser/screen microbenchmarks on synthetic colored output.
 - `--bench-startup`: hidden chrome construction timing and RSS.
 - Manual smoke: PowerShell and cmd tabs, `dir`, `git status`, colors, Unicode,
@@ -238,6 +249,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests\run-selftest.ps1
   (for example after a gap of empty cells). Reusing the previous run's start
   offset draws the text shifted left, which is visible in TUIs such as
   opencode.
+- Win32 input-mode records carry one UTF-16 code unit (`WORD`), not a code
+  point. Send surrogate halves separately; combining them and truncating breaks
+  emoji input.
+- Zero-width marks must attach to the wide *lead* cell, not its continuation
+  cell. VS16 (`U+FE0F`) promotes a text-style symbol to a two-cell emoji.
+- `ProcessCurrentDirectory` reads `RTL_USER_PROCESS_PARAMETERS` through the
+  PEB; x64 uses offsets 0x20/0x38 and WOW64 targets use 0x10/0x24.
 - Single-instance forwarding uses a hidden top-level window (`67tInstanceHost`)
   found with `FindWindowW` plus a named mutex to serialize startup. Message-only
   windows (`HWND_MESSAGE`) are invisible to `FindWindowW`, so the receiver must

@@ -18,6 +18,8 @@ bool EnsureDirectory(const std::wstring& path);
 
 std::wstring FullPath(const std::wstring& path);
 std::wstring FileNameOf(const std::wstring& path);
+// Current directory of another process (PEB read), or empty on failure.
+std::wstring ProcessCurrentDirectory(DWORD processId);
 std::wstring DirectoryOf(const std::wstring& path);
 std::wstring CompactPathLabel(const std::wstring& path);
 bool PathsEqual(const std::wstring& a, const std::wstring& b);

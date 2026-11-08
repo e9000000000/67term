@@ -125,6 +125,95 @@ std::wstring FileNameOf(const std::wstring& path) {
     return pos == std::wstring::npos ? path : path.substr(pos + 1);
 }
 
+namespace {
+
+using NtQueryInformationProcessFn = LONG(NTAPI*)(HANDLE, ULONG, PVOID, ULONG, PULONG);
+
+struct ProcessBasicInformation {
+    PVOID reserved1;
+    PVOID pebBaseAddress;
+    PVOID reserved2[2];
+    ULONG_PTR uniqueProcessId;
+    PVOID reserved3;
+};
+
+// Reads RTL_USER_PROCESS_PARAMETERS.CurrentDirectory through the target PEB.
+// x64 and WOW64 targets use different structure offsets.
+std::wstring ProcessCurrentDirectoryImpl(HANDLE process, NtQueryInformationProcessFn query) {
+    ProcessBasicInformation info{};
+    ULONG returned = 0;
+    if (query(process, 0 /*ProcessBasicInformation*/, &info, sizeof(info), &returned) < 0 ||
+        !info.pebBaseAddress) {
+        return {};
+    }
+
+    BOOL wow64 = FALSE;
+    PVOID peb = info.pebBaseAddress;
+    if (IsWow64Process(process, &wow64) && wow64) {
+        ULONG_PTR peb32 = 0;
+        if (query(process, 26 /*ProcessWow64Information*/, &peb32, sizeof(peb32), &returned) < 0 ||
+            !peb32) {
+            return {};
+        }
+        peb = reinterpret_cast<PVOID>(peb32);
+    }
+
+    const size_t parametersOffset = wow64 ? 0x10 : 0x20;
+    const size_t currentDirectoryOffset = wow64 ? 0x24 : 0x38;
+    BYTE* parameters = nullptr;
+    if (!ReadProcessMemory(process, static_cast<BYTE*>(peb) + parametersOffset, &parameters,
+                           sizeof(parameters), nullptr) ||
+        !parameters) {
+        return {};
+    }
+
+    struct CurrentDirectory {
+        USHORT length;
+        USHORT maximumLength;
+        PVOID buffer;
+    } directory{};
+    if (!ReadProcessMemory(process, parameters + currentDirectoryOffset, &directory,
+                           sizeof(directory), nullptr) ||
+        !directory.buffer || directory.length == 0 || directory.length >= 65534) {
+        return {};
+    }
+
+    std::wstring path(directory.length / sizeof(wchar_t), L'\0');
+    if (!ReadProcessMemory(process, directory.buffer, path.data(), directory.length, nullptr)) {
+        return {};
+    }
+    while (!path.empty() && path.back() == L'\0') {
+        path.pop_back();
+    }
+    // PEB current directories keep a trailing separator; drop it so paths
+    // compare naturally with configured directories (keep drive roots).
+    while (path.size() > 3 && (path.back() == L'\\' || path.back() == L'/')) {
+        path.pop_back();
+    }
+    return path;
+}
+
+}  // namespace
+
+std::wstring ProcessCurrentDirectory(DWORD processId) {
+    if (processId == 0) {
+        return {};
+    }
+    HANDLE process = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, processId);
+    if (!process) {
+        return {};
+    }
+    std::wstring result;
+    HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+    const auto query = reinterpret_cast<NtQueryInformationProcessFn>(
+        ntdll ? GetProcAddress(ntdll, "NtQueryInformationProcess") : nullptr);
+    if (query) {
+        result = ProcessCurrentDirectoryImpl(process, query);
+    }
+    CloseHandle(process);
+    return result;
+}
+
 std::wstring DirectoryOf(const std::wstring& path) {
     const size_t pos = path.find_last_of(L"\\/");
     if (pos == std::wstring::npos) {

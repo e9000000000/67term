@@ -54,7 +54,10 @@ public:
     int scrollbackLimit() const { return terminal_.scrollbackLimit(); }
 
     const std::wstring& title() const;
-    const std::wstring& workingDirectory() const { return terminal_.workingDirectory(); }
+    // OSC 7 when the shell reports it, otherwise the shell process's current
+    // directory (so new tabs inherit the tab's directory without shell
+    // integration).
+    std::wstring workingDirectory() const;
     const std::wstring& shellCommand() const { return shellCommand_; }
     bool promptReady() const { return !starting_ && !exited_ && !startFailed_; }
     bool exited() const { return exited_; }
@@ -197,5 +200,6 @@ private:
         int repeat = 1;
     };
     PendingWin32Key pendingWin32Key_;
+    PendingWin32Key pendingSurrogateKey_;
     bool win32KeySent_[256]{};
 };

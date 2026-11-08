@@ -138,7 +138,41 @@ bool IsWide(uint32_t cp) {
         (cp >= 0x30000 && cp <= 0x3FFFD)) {
         return true;
     }
+    // Emoji-presentation characters outside the ranges above. These occupy two
+    // cells even though they are not ideographs (rocket, check mark, hearts...).
+    if ((cp >= 0x231A && cp <= 0x231B) || (cp >= 0x23E9 && cp <= 0x23EC) ||
+        cp == 0x23F0 || cp == 0x23F3 || (cp >= 0x25FD && cp <= 0x25FE) ||
+        (cp >= 0x2614 && cp <= 0x2615) || (cp >= 0x2648 && cp <= 0x2653) ||
+        cp == 0x267F || cp == 0x2693 || cp == 0x26A1 ||
+        (cp >= 0x26AA && cp <= 0x26AB) || (cp >= 0x26BD && cp <= 0x26BE) ||
+        (cp >= 0x26C4 && cp <= 0x26C5) || cp == 0x26CE || cp == 0x26D4 ||
+        cp == 0x26EA || (cp >= 0x26F2 && cp <= 0x26F3) || cp == 0x26F5 ||
+        cp == 0x26FA || cp == 0x26FD || cp == 0x2705 ||
+        (cp >= 0x270A && cp <= 0x270B) || cp == 0x2728 || cp == 0x274C ||
+        cp == 0x274E || (cp >= 0x2753 && cp <= 0x2755) || cp == 0x2757 ||
+        (cp >= 0x2795 && cp <= 0x2797) || cp == 0x27B0 || cp == 0x27BF ||
+        (cp >= 0x2B1B && cp <= 0x2B1C) || cp == 0x2B50 || cp == 0x2B55) {
+        return true;
+    }
+    if ((cp >= 0x1F300 && cp <= 0x1F5FF) || (cp >= 0x1F600 && cp <= 0x1F64F) ||
+        (cp >= 0x1F680 && cp <= 0x1F6FF) || (cp >= 0x1F900 && cp <= 0x1F9FF)) {
+        return true;
+    }
     return false;
+}
+
+// True when a variation selector-16 turns this character into a wide emoji.
+bool IsEmojiVariationBase(uint32_t cp) {
+    if (IsWide(cp)) {
+        return true;
+    }
+    return cp == 0x00A9 || cp == 0x00AE || (cp >= 0x203C && cp <= 0x2049) ||
+           cp == 0x2122 || cp == 0x2139 || (cp >= 0x2194 && cp <= 0x2199) ||
+           (cp >= 0x21A9 && cp <= 0x21AA) || cp == 0x24C2 ||
+           (cp >= 0x25AA && cp <= 0x25AB) || cp == 0x25B6 || cp == 0x25C0 ||
+           (cp >= 0x25FB && cp <= 0x25FE) || (cp >= 0x2600 && cp <= 0x27BF) ||
+           (cp >= 0x2934 && cp <= 0x2935) || (cp >= 0x2B05 && cp <= 0x2B55) ||
+           cp == 0x3030 || cp == 0x303D || cp == 0x3297 || cp == 0x3299;
 }
 
 std::wstring Utf8ToWideLocal(std::string_view text) {
@@ -285,6 +319,15 @@ void appendUtf16(wchar_t (&dest)[4], uint32_t cp) {
         dest[used++] = static_cast<wchar_t>(0xDC00 + (value & 0x3FF));
     }
     dest[used] = 0;
+}
+
+uint32_t firstCodePoint(const wchar_t (&text)[4]) {
+    const wchar_t first = text[0];
+    if (first >= 0xD800 && first <= 0xDBFF && text[1] >= 0xDC00 && text[1] <= 0xDFFF) {
+        return 0x10000 + ((static_cast<uint32_t>(first) - 0xD800) << 10) +
+               (static_cast<uint32_t>(text[1]) - 0xDC00);
+    }
+    return static_cast<uint32_t>(first);
 }
 
 std::string encodeUtf8(uint32_t cp) {
@@ -656,14 +699,49 @@ void Terminal::printCodePoint(uint32_t cp) {
     }
     const int width = codePointWidth(cp);
     if (width == 0) {
-        // Append combining mark to the preceding cell.
+        // Append the mark to the base cell. After a wide character the cursor
+        // sits past its continuation cell, so step back to the lead cell.
         int x = cursorX_ - 1;
+        auto& cells = lineAt(cursorY_).cells;
+        if (cells.size() != static_cast<size_t>(columns_)) {
+            cells.resize(static_cast<size_t>(columns_), Cell{});
+        }
+        if (x >= columns_) {
+            x = columns_ - 1;
+        }
         if (x < 0) {
             x = 0;
         }
-        auto& cells = lineAt(cursorY_).cells;
-        if (x < static_cast<int>(cells.size())) {
-            appendUtf16(cells[static_cast<size_t>(x)].text, cp);
+        if (cells[static_cast<size_t>(x)].width == 0 && x > 0) {
+            --x;
+        }
+        Cell& base = cells[static_cast<size_t>(x)];
+        const uint32_t baseCodePoint = firstCodePoint(base.text);
+        appendUtf16(base.text, cp);
+        // VS16 turns a text-style symbol into a wide emoji. Promote the cell
+        // and reserve the second column so the glyph is not clipped.
+        if (cp == 0xFE0F && base.width == 1 && IsEmojiVariationBase(baseCodePoint) &&
+            x + 1 < columns_) {
+            if (!cells[static_cast<size_t>(x + 1)].empty()) {
+                for (int i = columns_ - 1; i > x + 1; --i) {
+                    cells[static_cast<size_t>(i)] = std::move(cells[static_cast<size_t>(i - 1)]);
+                }
+            }
+            Cell continuation = eraseCell();
+            continuation.width = 0;
+            continuation.attrs = base.attrs;
+            continuation.fg = base.fg;
+            continuation.bg = base.bg;
+            cells[static_cast<size_t>(x + 1)] = continuation;
+            base.width = 2;
+            if (cursorX_ == x + 1) {
+                if (x + 2 >= columns_) {
+                    cursorX_ = columns_ - 1;
+                    wrapPending_ = autowrap_;
+                } else {
+                    cursorX_ = x + 2;
+                }
+            }
         }
         return;
     }

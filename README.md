@@ -9,12 +9,14 @@ ConPTY shell. Same visual language as [67ed](../67ed).
 - Dark chrome: compact title/tab row with a burger menu and fixed new-tab button
 - Real PowerShell / cmd / any console program, UTF-8 VT input and output
 - Tabs with drag reorder, close buttons, OSC titles
+- New tabs (plus button, `Ctrl+Shift+T`) start in the current tab's directory
 - Launching 67t again opens a tab in the running window (`--new-window` for a
   separate window)
 - 10,000-line scrollback (configurable), wheel and keyboard scrolling
 - 16/256/24-bit color, bold/italic/underline/strike, cursor styles
 - Selection, copy/paste, bracketed paste, mouse reporting, IME input
-- UTF-8 and wide characters, alternate screen, scroll regions, DEC private modes
+- UTF-8, wide characters and emoji (astral cells, VS16), alternate screen,
+  scroll regions, DEC private modes
 - Win32 input mode: Ctrl+Backspace, Ctrl+Delete, Alt+arrows and the rest of the
   Windows key space behave like Windows Terminal
 - Resize reflows the ConPTY grid; close a tab and its shell is terminated
@@ -122,7 +124,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests\run-selftest.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File tests\run-bench.ps1
 ```
 
-Measured on this machine: 501 KiB EXE, 18.5 ms to parse and store 10,000 colored
+Measured on this machine: 513 KiB EXE, 18.5 ms to parse and store 10,000 colored
 lines (120x40, 10k scrollback), 5.9 ms for a resize cycle, about 50 MB RSS with
 10k scrollback lines.
 

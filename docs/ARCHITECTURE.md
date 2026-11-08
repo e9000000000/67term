@@ -80,6 +80,11 @@ Shutdown order: `TerminateProcess` if the child is still alive, close the
 pseudo console, close pipes, join the reader, close handles. `ClosePseudoConsole`
 is never called from the reader thread.
 
+The tab's directory comes from OSC 7 when the shell reports it; otherwise
+`ProcessCurrentDirectory` reads `RTL_USER_PROCESS_PARAMETERS.CurrentDirectory`
+through the shell's PEB, so New Tab inherits the directory without shell
+integration.
+
 ## Default terminal (console delegation)
 
 Windows can hand a new console session to a registered console host and then to
@@ -210,6 +215,9 @@ user is scrolled up when lines are trimmed, the viewport offset is adjusted.
   invisible skips glyph drawing; blink is honored at render time.
 - 16 ANSI colors, a 256-color cube, and 24-bit RGB are supported. Default
   foreground/background come from `theme.h`.
+- Astral characters (emoji) are stored as surrogate pairs in one wide cell and
+  drawn with GDI font linking; VS16 (`U+FE0F`) promotes a text-style symbol to
+  two cells, and zero-width marks attach to the wide lead cell.
 - Cursor: block, underline, or bar; optional blink; drawn only when focused and
   scrolled to the bottom.
 - Selection: click-drag, double-click word, triple-click line; highlight and
