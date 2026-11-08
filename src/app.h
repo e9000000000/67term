@@ -24,7 +24,8 @@ public:
     explicit App(HINSTANCE instance);
     ~App();
 
-    bool create(const LaunchOptions& options);
+    bool create(const LaunchOptions& options,
+                std::unique_ptr<PtyHandoff> handoff = nullptr);
     int run();
     HWND hwnd() const { return hwnd_; }
 
@@ -44,7 +45,8 @@ private:
     TermTab* activeTab();
     int activeIndex() const { return active_; }
     int indexOfView(HWND view) const;
-    TermTab& addTab(const std::wstring& workingDirectory);
+    TermTab& addTab(const std::wstring& workingDirectory,
+                    std::unique_ptr<PtyHandoff> handoff = nullptr);
     void closeTab(int index);
     void closeOtherTabs(int keep);
     void closeAllTabs();

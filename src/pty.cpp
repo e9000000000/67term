@@ -123,6 +123,61 @@ std::vector<wchar_t> BuildEnvironmentBlock() {
 
 }  // namespace
 
+PtyHandoff::~PtyHandoff() {
+    close();
+}
+
+PtyHandoff::PtyHandoff(PtyHandoff&& other) noexcept
+    : duplex(other.duplex),
+      input(other.input),
+      output(other.output),
+      signal(other.signal),
+      reference(other.reference),
+      server(other.server),
+      client(other.client),
+      title(std::move(other.title)),
+      clientName(std::move(other.clientName)) {
+    other.duplex = nullptr;
+    other.input = nullptr;
+    other.output = nullptr;
+    other.signal = nullptr;
+    other.reference = nullptr;
+    other.server = nullptr;
+    other.client = nullptr;
+}
+
+PtyHandoff& PtyHandoff::operator=(PtyHandoff&& other) noexcept {
+    if (this != &other) {
+        close();
+        duplex = other.duplex;
+        input = other.input;
+        output = other.output;
+        signal = other.signal;
+        reference = other.reference;
+        server = other.server;
+        client = other.client;
+        title = std::move(other.title);
+        clientName = std::move(other.clientName);
+        other.duplex = nullptr;
+        other.input = nullptr;
+        other.output = nullptr;
+        other.signal = nullptr;
+        other.reference = nullptr;
+        other.server = nullptr;
+        other.client = nullptr;
+    }
+    return *this;
+}
+
+void PtyHandoff::close() {
+    for (HANDLE* handle : {&duplex, &input, &output, &signal, &reference, &server, &client}) {
+        if (*handle) {
+            CloseHandle(*handle);
+            *handle = nullptr;
+        }
+    }
+}
+
 PtySession::~PtySession() {
     close();
 }
@@ -151,6 +206,18 @@ std::wstring PtySession::defaultShell() {
 bool PtySession::start(const std::wstring& commandLine, const std::wstring& workingDirectory,
                        int columns, int rows, HWND notify, std::wstring& error) {
     close();
+    attached_ = false;
+    duplex_ = nullptr;
+    attachSignal_ = nullptr;
+    attachReference_ = nullptr;
+    attachServer_ = nullptr;
+    attachClient_ = nullptr;
+    pid_ = 0;
+    {
+        std::lock_guard lock(writeMutex_);
+        writeQueue_.clear();
+        writePending_ = 0;
+    }
     if (!Api().ok) {
         error = L"ConPTY is not available on this version of Windows.";
         return false;
@@ -262,7 +329,9 @@ bool PtySession::start(const std::wstring& commandLine, const std::wstring& work
     output_ = outputRead;
     process_ = process.hProcess;
     pid_ = process.dwProcessId;
+    stopEvent_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     try {
+        startWriter();
         reader_ = std::thread(&PtySession::readerLoop, this);
         waiter_ = std::thread(&PtySession::waitLoop, this);
     } catch (...) {
@@ -272,12 +341,17 @@ bool PtySession::start(const std::wstring& commandLine, const std::wstring& work
         if (reader_.joinable()) {
             reader_.join();
         }
+        stopWriter();
         CloseHandle(process_);
         process_ = nullptr;
         CloseHandle(inputWrite);
         input_ = nullptr;
         CloseHandle(outputRead);
         output_ = nullptr;
+        if (stopEvent_) {
+            CloseHandle(stopEvent_);
+            stopEvent_ = nullptr;
+        }
         error = L"Cannot start the ConPTY reader thread.";
         return false;
     }
@@ -285,30 +359,222 @@ bool PtySession::start(const std::wstring& commandLine, const std::wstring& work
     return true;
 }
 
+bool PtySession::startAttached(std::unique_ptr<PtyHandoff> handoff, int columns, int rows,
+                               HWND notify, std::wstring& error) {
+    close();
+    if (!handoff) {
+        error = L"No terminal handoff data.";
+        return false;
+    }
+    columns = std::max(2, std::min(500, columns));
+    rows = std::max(1, std::min(300, rows));
+    notify_ = notify;
+    columns_ = columns;
+    rows_ = rows;
+    attached_ = true;
+    exited_.store(false);
+    closing_.store(false);
+    exitPosted_.store(false);
+    readerDone_ = false;
+    totalPending_ = 0;
+    {
+        std::lock_guard lock(queueMutex_);
+        queue_.clear();
+    }
+    {
+        std::lock_guard lock(writeMutex_);
+        writeQueue_.clear();
+        writePending_ = 0;
+    }
+    stopEvent_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+
+    duplex_ = handoff->duplex;
+    handoff->duplex = nullptr;
+    input_ = handoff->input;
+    handoff->input = nullptr;
+    output_ = handoff->output;
+    handoff->output = nullptr;
+    attachSignal_ = handoff->signal;
+    handoff->signal = nullptr;
+    attachReference_ = handoff->reference;
+    handoff->reference = nullptr;
+    attachServer_ = handoff->server;
+    handoff->server = nullptr;
+    attachClient_ = handoff->client;
+    handoff->client = nullptr;
+    pid_ = attachClient_ ? GetProcessId(attachClient_) : 0;
+    // The handle OpenConsole passes only allows query/set-information, not
+    // termination. Reopen it so closing the tab can reliably end the client.
+    if (pid_) {
+        HANDLE owned = OpenProcess(
+            SYNCHRONIZE | PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid_);
+        if (owned) {
+            if (attachClient_) {
+                CloseHandle(attachClient_);
+            }
+            attachClient_ = owned;
+        }
+    }
+
+    if (!duplex_ && (!input_ || !output_)) {
+        error = L"The terminal handoff did not provide usable pipes.";
+        close();
+        return false;
+    }
+    if (!attachClient_ || !attachReference_ || !attachSignal_) {
+        error = L"The terminal handoff is incomplete.";
+        close();
+        return false;
+    }
+
+    try {
+        startWriter();
+        reader_ = std::thread(&PtySession::readerLoop, this);
+        waiter_ = std::thread(&PtySession::waitLoop, this);
+    } catch (...) {
+        error = L"Cannot start the terminal reader thread.";
+        close();
+        return false;
+    }
+
+    sendAttachedResize(columns_, rows_);
+    error.clear();
+    return true;
+}
+
+void PtySession::sendAttachedResize(int columns, int rows) {
+    if (!attached_ || !attachSignal_) {
+        return;
+    }
+    // Undocumented-but-stable ConPTY signal packet used by OpenConsole:
+    // PTY_SIGNAL_RESIZE_WINDOW (8), width, height.
+    unsigned short packet[3] = {8u, static_cast<unsigned short>(columns),
+                                static_cast<unsigned short>(rows)};
+    DWORD written = 0;
+    WriteFile(attachSignal_, packet, sizeof(packet), &written, nullptr);
+}
+
 void PtySession::write(std::string_view bytes) {
     if (bytes.empty()) {
         return;
     }
-    std::lock_guard lock(writeMutex_);
-    if (!input_) {
-        return;
-    }
-    const char* data = bytes.data();
-    size_t remaining = bytes.size();
-    while (remaining > 0) {
-        DWORD written = 0;
-        const DWORD chunk = static_cast<DWORD>(std::min<size_t>(remaining, 32 * 1024));
-        if (!WriteFile(input_, data, chunk, &written, nullptr) || written == 0) {
+    {
+        std::lock_guard lock(writeMutex_);
+        if (closing_.load(std::memory_order_acquire)) {
             return;
         }
-        data += written;
-        remaining -= written;
+        constexpr size_t kMaxWriteBacklog = 4ull * 1024ull * 1024ull;
+        if (writePending_ + bytes.size() > kMaxWriteBacklog) {
+            return;
+        }
+        writeQueue_.emplace_back(bytes);
+        writePending_ += bytes.size();
+    }
+    writeCv_.notify_one();
+}
+
+void PtySession::startWriter() {
+    writer_ = std::thread(&PtySession::writerLoop, this);
+}
+
+void PtySession::stopWriter() {
+    closing_.store(true, std::memory_order_release);
+    if (writer_.joinable()) {
+        CancelSynchronousIo(writer_.native_handle());
+    }
+    writeCv_.notify_all();
+    if (writer_.joinable()) {
+        writer_.join();
+    }
+}
+
+void PtySession::writerLoop() {
+    HANDLE writeEvent = attached_ ? CreateEventW(nullptr, TRUE, FALSE, nullptr) : nullptr;
+    for (;;) {
+        std::string chunk;
+        {
+            std::unique_lock lock(writeMutex_);
+            writeCv_.wait(lock, [this] {
+                return closing_.load(std::memory_order_acquire) || !writeQueue_.empty();
+            });
+            if (writeQueue_.empty()) {
+                if (closing_.load(std::memory_order_acquire)) {
+                    break;
+                }
+                continue;
+            }
+            chunk = std::move(writeQueue_.front());
+            writeQueue_.pop_front();
+            writePending_ -= chunk.size();
+        }
+
+        HANDLE target = attached_ ? (duplex_ ? duplex_ : input_) : input_;
+        if (!target) {
+            continue;
+        }
+        const char* data = chunk.data();
+        size_t remaining = chunk.size();
+        bool failed = false;
+        while (remaining > 0) {
+            DWORD written = 0;
+            const DWORD part = static_cast<DWORD>(std::min<size_t>(remaining, 32 * 1024));
+            BOOL ok = FALSE;
+            if (attached_) {
+                OVERLAPPED overlapped{};
+                overlapped.hEvent = writeEvent;
+                ResetEvent(writeEvent);
+                ok = WriteFile(target, data, part, &written, &overlapped);
+                if (!ok) {
+                    const DWORD error = GetLastError();
+                    if (error != ERROR_IO_PENDING) {
+                        failed = true;
+                        break;
+                    }
+                    for (;;) {
+                        if (WaitForSingleObject(writeEvent, 100) == WAIT_OBJECT_0) {
+                            break;
+                        }
+                        if (closing_.load(std::memory_order_acquire)) {
+                            CancelIoEx(target, &overlapped);
+                        }
+                    }
+                    if (!GetOverlappedResult(target, &overlapped, &written, FALSE)) {
+                        failed = true;
+                        break;
+                    }
+                    ok = TRUE;
+                }
+            } else {
+                ok = WriteFile(target, data, part, &written, nullptr);
+            }
+            if (!ok || written == 0) {
+                failed = true;
+                break;
+            }
+            data += written;
+            remaining -= written;
+        }
+        if (failed || closing_.load(std::memory_order_acquire)) {
+            break;
+        }
+    }
+    if (writeEvent) {
+        CloseHandle(writeEvent);
     }
 }
 
 void PtySession::resize(int columns, int rows) {
     columns = std::max(2, std::min(500, columns));
     rows = std::max(1, std::min(300, rows));
+    if (attached_) {
+        if (columns == columns_ && rows == rows_) {
+            return;
+        }
+        columns_ = columns;
+        rows_ = rows;
+        sendAttachedResize(columns, rows);
+        return;
+    }
     if (!hpc_ || (columns == columns_ && rows == rows_)) {
         columns_ = columns;
         rows_ = rows;
@@ -318,6 +584,13 @@ void PtySession::resize(int columns, int rows) {
     Api().resize(hpc_, size);
     columns_ = columns;
     rows_ = rows;
+}
+
+bool PtySession::running() const {
+    if (exited_.load(std::memory_order_acquire)) {
+        return false;
+    }
+    return attached_ ? attachClient_ != nullptr : hpc_ != nullptr;
 }
 
 bool PtySession::drain(std::string& out) {
@@ -346,10 +619,44 @@ bool PtySession::drain(std::string& out) {
 void PtySession::readerLoop() {
     constexpr size_t kMaxPending = 8ull * 1024ull * 1024ull;
     std::vector<char> buffer(16384);
+    HANDLE source = attached_ ? (duplex_ ? duplex_ : output_) : output_;
+    // The handoff pipe is opened for overlapped I/O (ConPTY requires that on
+    // its end too), so reads from it must carry an OVERLAPPED structure.
+    HANDLE readEvent = attached_ ? CreateEventW(nullptr, TRUE, FALSE, nullptr) : nullptr;
     for (;;) {
         DWORD read = 0;
-        const BOOL ok = ReadFile(output_, buffer.data(), static_cast<DWORD>(buffer.size()), &read,
-                                 nullptr);
+        BOOL ok = FALSE;
+        if (attached_) {
+            OVERLAPPED overlapped{};
+            overlapped.hEvent = readEvent;
+            ResetEvent(readEvent);
+            ok = ReadFile(source, buffer.data(), static_cast<DWORD>(buffer.size()), &read,
+                          &overlapped);
+            if (!ok) {
+                const DWORD error = GetLastError();
+                if (error != ERROR_IO_PENDING) {
+                    break;
+                }
+                // Poll so this thread can cancel its own read when the session
+                // closes. CancelIoEx from another thread can miss a read that
+                // is issued right after the cancellation.
+                for (;;) {
+                    if (WaitForSingleObject(readEvent, 100) == WAIT_OBJECT_0) {
+                        break;
+                    }
+                    if (closing_.load(std::memory_order_acquire)) {
+                        CancelIoEx(source, &overlapped);
+                    }
+                }
+                if (!GetOverlappedResult(source, &overlapped, &read, FALSE)) {
+                    break;
+                }
+                ok = TRUE;
+            }
+        } else {
+            ok = ReadFile(source, buffer.data(), static_cast<DWORD>(buffer.size()), &read,
+                          nullptr);
+        }
         if (!ok || read == 0) {
             break;
         }
@@ -375,16 +682,25 @@ void PtySession::readerLoop() {
         std::lock_guard lock(queueMutex_);
         readerDone_ = true;
     }
+    if (readEvent) {
+        CloseHandle(readEvent);
+    }
     queueCv_.notify_all();
     exited_.store(true, std::memory_order_release);
     notifyExit();
 }
 
 void PtySession::waitLoop() {
-    if (!process_) {
+    HANDLE target = attached_ ? attachClient_ : process_;
+    if (!target) {
         return;
     }
-    WaitForSingleObject(process_, INFINITE);
+    if (stopEvent_) {
+        HANDLE handles[2] = {target, stopEvent_};
+        WaitForMultipleObjects(2, handles, FALSE, INFINITE);
+    } else {
+        WaitForSingleObject(target, INFINITE);
+    }
     // Give ConPTY a moment to flush the last output through the pipe.
     Sleep(120);
     exited_.store(true, std::memory_order_release);
@@ -408,6 +724,64 @@ void PtySession::close() {
         return;
     }
     queueCv_.notify_all();
+    if (stopEvent_) {
+        SetEvent(stopEvent_);
+    }
+
+    if (attached_) {
+        writeCv_.notify_all();
+        // Worker threads cancel their own pending overlapped I/O once they see
+        // closing_, so joining them here cannot race with a new read or write.
+        stopWriter();
+        if (reader_.joinable()) {
+            reader_.join();
+        }
+        // Closing a tab ends the attached console session, exactly like closing
+        // a spawned shell: terminate the client so the waiter and ConPTY unwind.
+        if (attachClient_) {
+            DWORD code = 0;
+            if (GetExitCodeProcess(attachClient_, &code) && code == STILL_ACTIVE) {
+                TerminateProcess(attachClient_, 1);
+            }
+        }
+        if (waiter_.joinable()) {
+            waiter_.join();
+        }
+        if (duplex_) {
+            CloseHandle(duplex_);
+            duplex_ = nullptr;
+        }
+        if (input_) {
+            CloseHandle(input_);
+            input_ = nullptr;
+        }
+        if (output_) {
+            CloseHandle(output_);
+            output_ = nullptr;
+        }
+        if (attachSignal_) {
+            CloseHandle(attachSignal_);
+            attachSignal_ = nullptr;
+        }
+        if (attachReference_) {
+            CloseHandle(attachReference_);
+            attachReference_ = nullptr;
+        }
+        if (attachServer_) {
+            CloseHandle(attachServer_);
+            attachServer_ = nullptr;
+        }
+        if (attachClient_) {
+            CloseHandle(attachClient_);
+            attachClient_ = nullptr;
+        }
+        if (stopEvent_) {
+            CloseHandle(stopEvent_);
+            stopEvent_ = nullptr;
+        }
+        exited_.store(true, std::memory_order_release);
+        return;
+    }
 
     if (process_) {
         DWORD code = 0;
@@ -423,6 +797,7 @@ void PtySession::close() {
         CloseHandle(input_);
         input_ = nullptr;
     }
+    stopWriter();
     if (reader_.joinable()) {
         reader_.join();
     }
@@ -437,6 +812,10 @@ void PtySession::close() {
         WaitForSingleObject(process_, 2000);
         CloseHandle(process_);
         process_ = nullptr;
+    }
+    if (stopEvent_) {
+        CloseHandle(stopEvent_);
+        stopEvent_ = nullptr;
     }
     exited_.store(true, std::memory_order_release);
 }

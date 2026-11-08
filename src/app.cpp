@@ -13,6 +13,7 @@
 
 #include "accel.h"
 #include "commands.h"
+#include "defterm.h"
 #include "theme.h"
 #include "util.h"
 #include "windowrect.h"
@@ -115,7 +116,7 @@ App::~App() {
     }
 }
 
-bool App::create(const LaunchOptions& options) {
+bool App::create(const LaunchOptions& options, std::unique_ptr<PtyHandoff> handoff) {
     options_ = options;
     EnsureDirectory(DataDirectory());
     LoadSettings(settings_);
@@ -187,7 +188,7 @@ bool App::create(const LaunchOptions& options) {
     ShowWindow(hwnd_, SW_SHOW);
     UpdateWindow(hwnd_);
     layout();
-    addTab(options_.cwd);
+    addTab(options_.cwd, std::move(handoff));
     if (settings_.maximized) {
         ShowWindow(hwnd_, SW_MAXIMIZE);
     }
@@ -267,7 +268,7 @@ int App::indexOfView(HWND view) const {
     return -1;
 }
 
-TermTab& App::addTab(const std::wstring& workingDirectory) {
+TermTab& App::addTab(const std::wstring& workingDirectory, std::unique_ptr<PtyHandoff> handoff) {
     auto tab = std::make_unique<TermTab>();
     tab->view = std::make_unique<TerminalView>();
     const bool created = tab->view->create(hwnd_, instance_);
@@ -283,16 +284,25 @@ TermTab& App::addTab(const std::wstring& workingDirectory) {
     }
     tab->view->setAppearance(settings_.fontFamily, settings_.fontSize, settings_.cursorBlink,
                              settings_.scrollback);
-    tab->lastTitle = shellDisplayName();
+    const std::wstring hint =
+        handoff ? (handoff->title.empty() ? handoff->clientName : handoff->title)
+                : shellDisplayName();
+    tab->lastTitle = hint.empty() ? L"Terminal" : hint;
     tabs_.push_back(std::move(tab));
     active_ = static_cast<int>(tabs_.size()) - 1;
     layout();
     updateTabBar();
     TermTab& added = *tabs_.back();
-    const std::wstring cwd =
-        workingDirectory.empty() ? defaultWorkingDirectory() : workingDirectory;
-    if (!added.view->start(shellCommand_, cwd, shellDisplayName())) {
-        added.exited = true;
+    if (handoff) {
+        if (!added.view->attach(std::move(handoff), hint)) {
+            added.exited = true;
+        }
+    } else {
+        const std::wstring cwd =
+            workingDirectory.empty() ? defaultWorkingDirectory() : workingDirectory;
+        if (!added.view->start(shellCommand_, cwd, shellDisplayName())) {
+            added.exited = true;
+        }
     }
     updateTabBar();
     updateTitle();
@@ -460,6 +470,11 @@ void App::showBurgerMenu(int section) {
         add(kCmdCloseTab, L"Close Tab", L"Ctrl+Shift+W", has);
         add(kCmdCloseOthers, L"Close Other Tabs", L"", tabs_.size() > 1);
         add(kCmdCloseAll, L"Close All Tabs", L"", !tabs_.empty());
+        separator();
+        add(kCmdSetDefaultTerminal, L"Make 67t the Default Terminal", L"", true,
+            defterm::IsDefault());
+        add(kCmdRestoreDefaultTerminal, L"Restore Previous Default Terminal", L"",
+            defterm::CanRestore());
         separator();
         add(kCmdExit, L"Exit", L"Alt+F4");
         break;
@@ -636,6 +651,38 @@ void App::onCommand(UINT id) {
     case kCmdFont:
         showFontDialog();
         break;
+    case kCmdSetDefaultTerminal: {
+        if (defterm::IsDefault()) {
+            MessageBoxW(hwnd_, L"67t is already the default terminal.",
+                        L"Default Terminal", MB_OK | MB_ICONINFORMATION);
+            break;
+        }
+        std::wstring error;
+        if (defterm::SetAsDefault(error)) {
+            MessageBoxW(hwnd_,
+                        L"67t is now the default terminal.\n\n"
+                        L"New console windows will open in 67t. Existing console windows are "
+                        L"unchanged.\n\n"
+                        L"If a console app still opens the old console, close it completely "
+                        L"and launch it again.",
+                        L"Default Terminal", MB_OK | MB_ICONINFORMATION);
+        } else {
+            MessageBoxW(hwnd_, error.c_str(), L"Default Terminal", MB_OK | MB_ICONERROR);
+        }
+        break;
+    }
+    case kCmdRestoreDefaultTerminal: {
+        std::wstring error;
+        if (defterm::RestorePrevious(error)) {
+            MessageBoxW(hwnd_,
+                        L"The previous default terminal setting was restored.\n\n"
+                        L"New console windows will use it.",
+                        L"Default Terminal", MB_OK | MB_ICONINFORMATION);
+        } else {
+            MessageBoxW(hwnd_, error.c_str(), L"Default Terminal", MB_OK | MB_ICONERROR);
+        }
+        break;
+    }
     default:
         break;
     }

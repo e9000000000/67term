@@ -39,6 +39,7 @@ public:
 
     bool start(const std::wstring& commandLine, const std::wstring& workingDirectory,
                const std::wstring& titleHint);
+    bool attach(std::unique_ptr<PtyHandoff> handoff, const std::wstring& titleHint);
     void restart();
     void closeSession();
 
@@ -90,6 +91,8 @@ private:
     void applySize();
     void feedFromSession();
     void onSessionExit();
+    void installCallbacks();
+    void prepareForSession(const std::wstring& titleHint);
     void paint(HDC target);
     void paintGrid(HDC dc, const RECT& client);
     void paintCursor(HDC dc);

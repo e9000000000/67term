@@ -11,6 +11,8 @@ struct LaunchOptions {
     bool selfTest = false;
     bool bench = false;
     bool benchStartup = false;
+    bool setDefaultTerminal = false;
+    bool restoreDefaultTerminal = false;
     bool help = false;
     bool version = false;
     int benchLines = 10000;

@@ -18,6 +18,9 @@ ConPTY shell. Same visual language as [67ed](../67ed).
 - Resize reflows the ConPTY grid; close a tab and its shell is terminated
 - Font chooser (fixed-pitch, size), font zoom, fullscreen
 - Remembers window placement, font, scrollback, and cursor blink
+- Can register itself as the Windows **default terminal** through the real
+  console-delegation COM handoff, so `cmd`, PowerShell, and other console apps
+  open in 67t
 
 ## Build
 
@@ -38,7 +41,12 @@ build\67t.exe                       # default shell (pwsh, powershell, or cmd)
 build\67t.exe --shell cmd.exe
 build\67t.exe --cwd C:\src
 build\67t.exe C:\src                # a directory argument sets the start dir
+build\67t.exe --set-default-terminal     # make 67t the Windows default terminal
+build\67t.exe --restore-default-terminal # restore the previous setting
 ```
+
+The same two actions are in the burger menu: **Make 67t the Default Terminal**
+and **Restore Previous Default Terminal**.
 
 ## Shortcuts
 
@@ -76,6 +84,21 @@ scrollback=10000
 cursorBlink=1
 ```
 
+## Default terminal
+
+Windows delegates new console sessions to a registered console host
+(`OpenConsole.exe`) and then to a registered terminal via COM. 67t implements
+`ITerminalHandoff3` as an out-of-proc COM local server (`67t.exe -Embedding`),
+attaches to the handed-off ConPTY, and shows it in a normal tab.
+
+Setting this up requires **Windows Terminal to be installed**: 67t uses Windows
+Terminal's `OpenConsole.exe` as the console host and its
+`OpenConsoleProxy.dll` as the marshalling proxy. The proxy is copied to
+`%APPDATA%\67t\OpenConsoleProxy.dll` (the WindowsApps copy cannot be loaded
+directly) and registered under `HKCU\Software\Classes`. No administrator rights
+are needed, and the previous default is saved and restored from
+`HKCU\Software\67t\DefaultTerminal`.
+
 ## Status
 
 Under construction, but usable as a daily terminal. See
@@ -89,7 +112,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests\run-selftest.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File tests\run-bench.ps1
 ```
 
-Measured on this machine: 460 KiB EXE, 18.5 ms to parse and store 10,000 colored
+Measured on this machine: 491 KiB EXE, 18.5 ms to parse and store 10,000 colored
 lines (120x40, 10k scrollback), 5.9 ms for a resize cycle, about 50 MB RSS with
 10k scrollback lines.
 

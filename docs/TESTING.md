@@ -42,7 +42,7 @@ Reference numbers (this machine, release build):
 
 | Metric | Value |
 |---|---|
-| EXE | 470,528 bytes |
+| EXE | 502,784 bytes |
 | 10,000 lines parse + store | 18.5 ms |
 | Resize cycle (100x30 → 140x45 → 120x40) | 5.9 ms |
 | RSS with 10k scrollback lines | ~50 MB |
@@ -64,3 +64,14 @@ Reference numbers (this machine, release build):
 - Drop a folder on the window: a new tab opens there.
 - Close the app and relaunch: size/position and settings restore.
 - Close a tab while a long-running process is active; no orphan child remains.
+- Default terminal: burger menu → **Make 67t the Default Terminal**, then launch
+  `cmd.exe` from the Run dialog. It must open in a 67t tab (title `cmd`), show the
+  prompt, echo typed commands, and close without leaving a 67t process behind.
+- While that tab is open, confirm `Get-CimInstance Win32_Process` shows
+  `OpenConsole.exe -Embedding` and `conhost.exe` under the client, and that
+  `67t.exe -Embedding` has the terminal window.
+- Burger menu → **Restore Previous Default Terminal** (or
+  `67t.exe --restore-default-terminal --log build\restore.log`); verify
+  `HKCU\Console\%%Startup` returns to the previous values.
+- If Windows Terminal is not installed, **Make 67t the Default Terminal** must
+  show a clear error instead of leaving the setting half-applied.

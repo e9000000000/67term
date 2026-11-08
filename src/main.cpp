@@ -3,12 +3,15 @@
 #include <objbase.h>
 #include <shellapi.h>
 
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "app.h"
 #include "cli.h"
 #include "crashlog.h"
+#include "defterm.h"
+#include "handoff.h"
 #include "headless.h"
 #include "pty.h"
 #include "util.h"
@@ -31,10 +34,16 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     int argc = 0;
     if (LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc)) {
         for (int i = 1; i < argc; ++i) {
-            arguments.emplace_back(argv[i]);
+            const std::wstring argument = argv[i];
+            if (_wcsicmp(argument.c_str(), L"-Embedding") == 0 ||
+                _wcsicmp(argument.c_str(), L"/Embedding") == 0) {
+                continue;
+            }
+            arguments.push_back(argument);
         }
         LocalFree(argv);
     }
+    const bool embedding = handoff::IsEmbeddingLaunch();
     const LaunchOptions options = ParseOptions(arguments);
 
     if (options.help) {
@@ -60,6 +69,23 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     if (options.benchStartup) {
         return RunStartupBench(options.logPath);
     }
+    if (options.setDefaultTerminal || options.restoreDefaultTerminal) {
+        std::wstring error;
+        const bool ok = options.setDefaultTerminal ? defterm::SetAsDefault(error)
+                                                   : defterm::RestorePrevious(error);
+        const std::wstring text =
+            ok ? (options.setDefaultTerminal ? L"ok: 67t is the default terminal"
+                                             : L"ok: previous default terminal restored")
+               : L"error: " + error;
+        if (!options.logPath.empty()) {
+            std::wstring writeError;
+            WriteTextFileAtomic(options.logPath, WideToUtf8(text + L"\r\n"), writeError);
+        } else {
+            MessageBoxW(nullptr, text.c_str(), L"67t Default Terminal",
+                        MB_OK | (ok ? MB_ICONINFORMATION : MB_ICONERROR));
+        }
+        return ok ? 0 : 1;
+    }
 
     if (!PtySession::available()) {
         Report(L"ConPTY is not available on this version of Windows.\n"
@@ -71,8 +97,17 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     crashlog::Install();
 
+    std::unique_ptr<PtyHandoff> pendingHandoff;
+    if (embedding) {
+        pendingHandoff = handoff::RunServer(instance);
+        if (!pendingHandoff) {
+            CoUninitialize();
+            return 0;
+        }
+    }
+
     App app(instance);
-    if (!app.create(options)) {
+    if (!app.create(options, std::move(pendingHandoff))) {
         Report(L"Cannot create the 67t window.");
         CoUninitialize();
         return 1;

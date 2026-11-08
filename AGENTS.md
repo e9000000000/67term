@@ -12,7 +12,7 @@ controls, no installer, no menu bar or status bar.
 ## Current state
 
 M0 and M1 are complete, and M2 is partly done. The app builds as one x64
-executable (~460 KiB) and runs real shells through ConPTY. It has: custom dark
+executable (~490 KiB) and runs real shells through ConPTY. It has: custom dark
 title/tab chrome with a burger menu and fixed new-tab button, multiple tabs with
 drag reorder and context menus, a UTF-8 VT parser with 16/256/24-bit color, wide
 characters, alternate screen, scroll regions and scrollback, a GDI renderer with
@@ -20,6 +20,14 @@ cursor styles and selection, keyboard/mouse/IME input (including Win32 input
 mode), bracketed paste, shell-exit detection and restart, font settings, font
 zoom, fullscreen, settings/window persistence, drag-and-drop, OSC titles, OSC 7
 working directories and OSC 52 clipboard writes.
+
+67t can also register itself as the Windows **default terminal**. It implements
+`ITerminalHandoff3` as an out-of-proc COM local server (`67t.exe -Embedding`) and
+attaches to the ConPTY session handed off by Windows. This uses Windows
+Terminal's `OpenConsole.exe` console host and copies its
+`OpenConsoleProxy.dll` to `%APPDATA%\67t` for proxy/stub registration. The menu
+action and the CLI flags save and restore the previous default; no admin rights
+are needed.
 
 Known gaps: scrollback search, split panes, OSC 8 hyperlinks, shell-integration
 marks, and restoring tabs across restarts. Read `docs/PLAN.md` for milestones and
@@ -47,8 +55,13 @@ build\67t.exe                       # new tab in the default shell
 build\67t.exe --shell cmd.exe       # override the shell for this launch
 build\67t.exe --cwd C:\src          # start directory
 build\67t.exe C:\src                # a directory argument becomes the start dir
+build\67t.exe --set-default-terminal     # make 67t the Windows default terminal
+build\67t.exe --restore-default-terminal # restore the saved previous default
 build\67t.exe --help
 ```
+
+`--set-default-terminal` and `--restore-default-terminal` write a status line to
+`--log <path>` when one is given; otherwise they show a message box.
 
 Every launch is its own window; there is no single-instance handoff.
 
@@ -66,7 +79,9 @@ src/
   theme.h           palette, metrics, DPI helpers
   util.*            UTF conversions, paths, errors, dark-mode helpers
   settings.*        settings.ini and window-placement persistence
-  pty.*             ConPTY creation, child process, reader thread, resize
+  pty.*             ConPTY creation, attached sessions, reader/writer threads, resize
+  defterm.*         default-terminal registry setup, proxy install, set/restore
+  handoff.*         COM local server for ITerminalHandoff3 (default terminal)
   terminal.*        screen buffer, VT parser, scrollback, modes, responses
   input.*           xterm key/mouse sequence encoding, paste normalization
   view.*            terminal child window: renderer, keyboard, mouse, IME
@@ -123,7 +138,7 @@ Measure with `67t.exe --bench-startup` and the self-test timings:
 
 Do not regress these without updating the plan and recording numbers.
 
-Latest measured release build: 470,528-byte EXE; 10,000 colored lines parsed and
+Latest measured release build: 502,784-byte EXE; 10,000 colored lines parsed and
 stored in 18.5 ms; resize cycle 5.9 ms; ~50 MB RSS with 10k scrollback lines;
 hidden chrome construction under 1 ms.
 
@@ -165,6 +180,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests\run-selftest.ps1
   arrows in a REPL, mouse
   reporting (`more`, vim if installed), DPI 125/150/200%, close tab while a
   process runs, exit the shell and restart the tab.
+- Default terminal: `--set-default-terminal`, then start `cmd.exe` from the Run
+  dialog; it must open in a 67t tab, echo typed input, and exit cleanly. Check
+  the process tree has `OpenConsole.exe` under `svchost.exe`, then run
+  `--restore-default-terminal` and confirm `HKCU\Console\%%Startup` is back.
 
 ## Known pitfalls
 
@@ -181,3 +200,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests\run-selftest.ps1
   private modes and CSI commands rather than failing.
 - Selection should preserve wide characters and not copy continuation cells.
 - DWM dark title bar is best effort; the app chrome itself must always be dark.
+- Default-terminal handoff needs Windows Terminal's `OpenConsole.exe` and
+  `OpenConsoleProxy.dll`. The WindowsApps copy cannot be loaded directly
+  (`LoadLibrary` returns access denied), so it is copied to `%APPDATA%\67t` and
+  registered from there.
+- The handed-off terminal pipe **must** be opened for overlapped I/O on both
+  ends. A synchronous duplex pipe receives the ConPTY handshake and then stalls;
+  ConPTY uses overlapped reads/writes on its end.
+- The COM server is launched as `67t.exe -Embedding`; it waits up to 15 seconds
+  for a handoff, then exits without showing a window if none arrives.

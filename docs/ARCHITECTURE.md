@@ -16,7 +16,8 @@ One process owns one window, any number of tabs, and one ConPTY session per tab.
 ```
 
 Closing a tab destroys its view and closes its pseudo console, which ends the
-shell. There is no daemon, no network listener, and no cross-process handoff.
+shell. There is no daemon and no network listener. The only cross-process
+handoff is the optional Windows default-terminal COM delegation described below.
 
 ## Why ConPTY
 
@@ -51,13 +52,70 @@ Backlog is bounded (8 MiB). If a shell floods output faster than the UI can draw
 the reader blocks on the pipe once the cap is reached, which applies natural
 backpressure to the child.
 
-`write` encodes UTF-8 bytes and `WriteFile`s them to the input pipe on the UI
-thread (small writes; a paste is written in one call). `resize` calls
-`ResizePseudoConsole` only when the grid size actually changes.
+`write` queues UTF-8 bytes for a writer thread, which `WriteFile`s them to the
+input pipe. Keeping pipe writes off the UI thread means a console client that
+stops reading its input can never block painting or input handling. The queue is
+bounded (4 MiB). `resize` calls `ResizePseudoConsole` only when the grid size
+actually changes.
 
 Shutdown order: `TerminateProcess` if the child is still alive, close the
 pseudo console, close pipes, join the reader, close handles. `ClosePseudoConsole`
 is never called from the reader thread.
+
+## Default terminal (console delegation)
+
+Windows can hand a new console session to a registered console host and then to
+a registered terminal. 67t participates in the second half of that chain.
+
+```
+client (cmd.exe)
+└─ conhost.exe          inbox console, stays alive for signalling
+   ├─ OpenConsole.exe   delegated console host, -Embedding COM server
+   │  └─ 67t.exe        terminal, -Embedding COM server
+   └─ ConPTY pipes ─────► attached tab
+```
+
+Setting 67t as the default writes `HKCU\Console\%%Startup`:
+
+- `DelegationConsole` = Windows Terminal's stable OpenConsole CLSID
+  (`{2EACA947-7F5F-4CFA-BA87-8F7FBEEFBE69}`)
+- `DelegationTerminal` = 67t's terminal CLSID (`{AE70E244-…-B17033538EDB}`)
+
+`defterm.cpp` finds the installed Windows Terminal package, copies its
+`OpenConsoleProxy.dll` to `%APPDATA%\67t`, and registers:
+
+- `HKCU\Software\Classes\CLSID\{67t terminal}` → `LocalServer32` =
+  `"…\67t.exe" -Embedding`
+- `HKCU\Software\Classes\CLSID\{OpenConsole proxy}` → `InprocServer32` pointing
+  at the copied DLL
+- `HKCU\Software\Classes\Interface\{ITerminalHandoff3}` → `ProxyStubClsid32`
+
+The previous pair is saved under `HKCU\Software\67t\DefaultTerminal` and restored
+by the menu or `--restore-default-terminal`.
+
+When COM launches `67t.exe -Embedding`, `handoff::RunServer` registers a
+single-use `IClassFactory` for the terminal CLSID and pumps messages. OpenConsole
+calls `ITerminalHandoff3::EstablishPtyHandoff`, which 67t handles by:
+
+1. Duplicating the signal, reference, server (OpenConsole) and client process
+   handles.
+2. Creating a named duplex pipe with `FILE_FLAG_OVERLAPPED` on both ends, keeping
+   the server end.
+3. Returning two duplicated client ends as `in` and `out`, which COM marshals to
+   OpenConsole.
+4. Handing the pipe and process handles to a new tab via `PtySession::startAttached`.
+
+The overlapped flag is required: ConPTY does overlapped I/O on its ends, and a
+synchronous pipe delivers the initial handshake and then stalls.
+
+Attached sessions differ from spawned ones:
+
+- No `CreatePseudoConsole` and no `CreateProcess`; the client already exists.
+- Reads and writes use `OVERLAPPED` events; the pipe is overlapped.
+- Resize sends the signal-pipe packet `{8, columns, rows}` as three `unsigned
+  short`s (`PTY_SIGNAL_RESIZE_WINDOW`).
+- Closing the tab closes the pipe and terminates the client; the waiter thread
+  tracks the client process handle.
 
 ## Terminal engine
 

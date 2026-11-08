@@ -11,6 +11,7 @@
 
 #include "input.h"
 #include "theme.h"
+#include "util.h"
 #include "view.h"
 
 namespace {
@@ -281,11 +282,7 @@ void TerminalView::applySize() {
     invalidate();
 }
 
-bool TerminalView::start(const std::wstring& commandLine, const std::wstring& workingDirectory,
-                         const std::wstring& titleHint) {
-    session_.close();
-    shellCommand_ = commandLine;
-    workingDirectory_ = workingDirectory;
+void TerminalView::prepareForSession(const std::wstring& titleHint) {
     titleHint_ = titleHint;
     starting_ = true;
     startFailed_ = false;
@@ -299,7 +296,9 @@ bool TerminalView::start(const std::wstring& commandLine, const std::wstring& wo
     terminal_.reset(true);
     terminal_.resize(columns_, rows_);
     terminal_.setPixelSize(columns_ * cellWidth_, rows_ * cellHeight_);
+}
 
+void TerminalView::installCallbacks() {
     terminal_.setResponseCallback([this](std::string text) { session_.write(text); });
     terminal_.setTitleCallback([this](const std::wstring&) {
         notifyParent(kViewTitleChanged);
@@ -316,9 +315,54 @@ bool TerminalView::start(const std::wstring& commandLine, const std::wstring& wo
     terminal_.setDirectoryCallback([this](const std::wstring&) {
         notifyParent(kViewStateChanged);
     });
+}
+
+bool TerminalView::start(const std::wstring& commandLine, const std::wstring& workingDirectory,
+                         const std::wstring& titleHint) {
+    session_.close();
+    shellCommand_ = commandLine;
+    workingDirectory_ = workingDirectory;
+    prepareForSession(titleHint);
+    installCallbacks();
 
     std::wstring error;
     const bool ok = session_.start(commandLine, workingDirectory, columns_, rows_, hwnd_, error);
+    starting_ = false;
+    if (!ok) {
+        startFailed_ = true;
+        exited_ = true;
+        const std::wstring message = L"\x1b[31m" + error + L"\x1b[0m\r\n";
+        std::string utf8;
+        const int length = WideCharToMultiByte(CP_UTF8, 0, message.c_str(),
+                                               static_cast<int>(message.size()), nullptr, 0,
+                                               nullptr, nullptr);
+        if (length > 0) {
+            utf8.resize(static_cast<size_t>(length));
+            WideCharToMultiByte(CP_UTF8, 0, message.c_str(), static_cast<int>(message.size()),
+                                utf8.data(), length, nullptr, nullptr);
+            terminal_.feed(utf8);
+        }
+        notifyParent(kViewExited);
+        invalidate();
+        return false;
+    }
+
+    notifyParent(kViewTitleChanged);
+    notifyParent(kViewStateChanged);
+    invalidate();
+    return true;
+}
+
+bool TerminalView::attach(std::unique_ptr<PtyHandoff> handoff, const std::wstring& titleHint) {
+    session_.close();
+    // Restarting a handed-off tab starts a fresh local shell.
+    shellCommand_ = PtySession::defaultShell();
+    workingDirectory_.clear();
+    prepareForSession(titleHint.empty() ? L"Terminal" : titleHint);
+    installCallbacks();
+
+    std::wstring error;
+    const bool ok = session_.startAttached(std::move(handoff), columns_, rows_, hwnd_, error);
     starting_ = false;
     if (!ok) {
         startFailed_ = true;

@@ -29,11 +29,12 @@
   and shell exit/restart.
 - **M2 in progress.** OSC 7 directories, OSC 52 clipboard writes, SGR mouse,
   Win32 input mode (Ctrl+Backspace/Ctrl+Delete), word/line selection, scrollback
-  bar, and Shift+PageUp/PageDown are done. Remaining: scrollback search, OSC 8
+  bar, Shift+PageUp/PageDown, and Windows default-terminal registration
+  (`ITerminalHandoff3` COM handoff) are done. Remaining: scrollback search, OSC 8
   hyperlinks, shell-integration marks, and optional focus/attention polish.
 - **M3 not started.**
 
-Latest measured release build: 470,528 bytes; 10,000 colored lines parsed and
+Latest measured release build: 502,784 bytes; 10,000 colored lines parsed and
 stored in 18.5 ms; resize cycle 5.9 ms; ~50 MB RSS with 10k scrollback lines.
 
 ## Target numbers
@@ -89,6 +90,8 @@ and font settings.
 - Mouse: SGR, button/motion modes, Shift override for selection.
 - Selection improvements: word/line selection on double/triple click, auto-scroll.
 - Shell integration marks (OSC 133) for scroll-to-prompt, optional.
+- Windows default-terminal registration through console delegation
+  (`ITerminalHandoff3`), with save/restore of the previous setting.
 
 **Done when:** common TUI programs (vim, less, htop if present) render and respond
 to keys and mouse; search is usable on 10k lines.

@@ -56,6 +56,10 @@ LaunchOptions ParseOptions(const std::vector<std::wstring>& arguments) {
             }
         } else if (_wcsicmp(arg.c_str(), L"--bench-startup") == 0) {
             options.benchStartup = true;
+        } else if (_wcsicmp(arg.c_str(), L"--set-default-terminal") == 0) {
+            options.setDefaultTerminal = true;
+        } else if (_wcsicmp(arg.c_str(), L"--restore-default-terminal") == 0) {
+            options.restoreDefaultTerminal = true;
         } else if (_wcsicmp(arg.c_str(), L"--help") == 0 || _wcsicmp(arg.c_str(), L"-h") == 0 ||
                    _wcsicmp(arg.c_str(), L"/?") == 0) {
             options.help = true;
@@ -105,6 +109,8 @@ std::wstring UsageText() {
            L"      --selftest          run headless self-tests\n"
            L"      --bench [lines]     run parser/screen microbenchmarks\n"
            L"      --bench-startup     measure hidden chrome construction\n"
+           L"      --set-default-terminal   make 67t the Windows default terminal\n"
+           L"      --restore-default-terminal  restore the previous default terminal\n"
            L"      --log <path>        write headless output to a file\n"
            L"  -h, --help              show this help\n"
            L"  -v, --version           show the version\n";
