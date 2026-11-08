@@ -32,6 +32,10 @@ public:
     // Opens a tab for a launch forwarded by a second instance of 67t.
     void openTabFromRequest(const std::wstring& workingDirectory, const std::wstring& shell);
 
+    // Opens tabs for console sessions handed to 67t by Windows (default
+    // terminal delegation).
+    void attachPendingHandoffs();
+
 private:
     static LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
     LRESULT handleMessage(UINT message, WPARAM wParam, LPARAM lParam);

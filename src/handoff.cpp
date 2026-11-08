@@ -5,7 +5,10 @@
 #include <shellapi.h>
 
 #include <atomic>
+#include <deque>
+#include <functional>
 #include <iterator>
+#include <mutex>
 #include <new>
 #include <string>
 
@@ -48,7 +51,12 @@ struct __declspec(uuid("6F23DA90-15C5-4203-9DB0-64E73F1B1B00")) ITerminalHandoff
 };
 
 HWND g_host = nullptr;
-std::unique_ptr<PtyHandoff> g_pending;
+DWORD g_cookie = 0;
+bool g_registered = false;
+bool g_bootstrapped = false;
+std::mutex g_mutex;
+std::deque<std::unique_ptr<PtyHandoff>> g_queue;
+std::function<void()> g_handler;
 
 bool DuplicateHandleLocal(HANDLE source, HANDLE& destination) {
     destination = nullptr;
@@ -146,7 +154,7 @@ public:
     HRESULT STDMETHODCALLTYPE EstablishPtyHandoff(
         HANDLE* in, HANDLE* out, HANDLE signal, HANDLE reference, HANDLE server, HANDLE client,
         const TERMINAL_STARTUP_INFO* startupInfo) override {
-        if (!in || !out || g_pending) {
+        if (!in || !out) {
             return E_UNEXPECTED;
         }
         *in = nullptr;
@@ -181,9 +189,13 @@ public:
             *out = nullptr;
             return E_UNEXPECTED;
         }
-        g_pending = std::move(handoff);
+        {
+            std::lock_guard lock(g_mutex);
+            g_queue.push_back(std::move(handoff));
+        }
         if (!PostMessageW(g_host, kHandoffMessage, 0, 0)) {
-            g_pending.reset();
+            std::lock_guard lock(g_mutex);
+            g_queue.pop_back();
             CloseHandle(*in);
             CloseHandle(*out);
             *in = nullptr;
@@ -253,7 +265,12 @@ private:
 LRESULT CALLBACK HostProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
     switch (message) {
     case kHandoffMessage:
-        PostQuitMessage(0);
+        if (g_handler) {
+            g_handler();
+        } else if (!g_bootstrapped) {
+            // Ends the RunServer pump; the handoff stays queued.
+            PostQuitMessage(0);
+        }
         return 0;
     case WM_TIMER:
         if (wParam == kHandoffTimeout) {
@@ -266,6 +283,23 @@ LRESULT CALLBACK HostProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
         break;
     }
     return DefWindowProcW(hwnd, message, wParam, lParam);
+}
+
+bool CreateHost(HINSTANCE instance) {
+    if (g_host) {
+        return true;
+    }
+    WNDCLASSEXW wc{};
+    wc.cbSize = sizeof(wc);
+    wc.lpfnWndProc = HostProc;
+    wc.hInstance = instance;
+    wc.lpszClassName = kHostClass;
+    if (!RegisterClassExW(&wc) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
+        return false;
+    }
+    g_host = CreateWindowExW(0, kHostClass, L"", WS_POPUP, 0, 0, 0, 0, nullptr, nullptr, instance,
+                             nullptr);
+    return g_host != nullptr;
 }
 
 }  // namespace
@@ -287,37 +321,36 @@ bool IsEmbeddingLaunch() {
     return embedding;
 }
 
-std::unique_ptr<PtyHandoff> RunServer(HINSTANCE instance) {
-    WNDCLASSEXW wc{};
-    wc.cbSize = sizeof(wc);
-    wc.lpfnWndProc = HostProc;
-    wc.hInstance = instance;
-    wc.lpszClassName = kHostClass;
-    if (!RegisterClassExW(&wc) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
-        return nullptr;
+bool StartServer(HINSTANCE instance) {
+    if (g_registered) {
+        return true;
     }
-    g_host = CreateWindowExW(0, kHostClass, L"", WS_POPUP, 0, 0, 0, 0, nullptr, nullptr, instance,
-                             nullptr);
-    if (!g_host) {
-        return nullptr;
+    if (!CreateHost(instance)) {
+        return false;
     }
-    SetTimer(g_host, kHandoffTimeout, kHandoffTimeoutMs, nullptr);
 
     auto* factory = new (std::nothrow) HandoffFactory();
     if (!factory) {
-        DestroyWindow(g_host);
-        g_host = nullptr;
-        return nullptr;
+        return false;
     }
-    DWORD cookie = 0;
+    // MULTIPLEUSE keeps this process as the COM server for every delegated
+    // console, so each one arrives as a tab instead of a new window.
     const HRESULT registered = CoRegisterClassObject(kTerminalClsidValue, factory,
-                                                     CLSCTX_LOCAL_SERVER, REGCLS_SINGLEUSE, &cookie);
+                                                     CLSCTX_LOCAL_SERVER, REGCLS_MULTIPLEUSE,
+                                                     &g_cookie);
     factory->Release();
     if (FAILED(registered)) {
-        DestroyWindow(g_host);
-        g_host = nullptr;
+        return false;
+    }
+    g_registered = true;
+    return true;
+}
+
+std::unique_ptr<PtyHandoff> RunServer(HINSTANCE instance) {
+    if (!StartServer(instance)) {
         return nullptr;
     }
+    SetTimer(g_host, kHandoffTimeout, kHandoffTimeoutMs, nullptr);
 
     MSG message{};
     while (GetMessageW(&message, nullptr, 0, 0) > 0) {
@@ -326,10 +359,48 @@ std::unique_ptr<PtyHandoff> RunServer(HINSTANCE instance) {
     }
 
     KillTimer(g_host, kHandoffTimeout);
-    CoRevokeClassObject(cookie);
-    DestroyWindow(g_host);
-    g_host = nullptr;
-    return std::move(g_pending);
+    g_bootstrapped = true;
+    return TakePending();
+}
+
+std::unique_ptr<PtyHandoff> TakePending() {
+    std::lock_guard lock(g_mutex);
+    if (g_queue.empty()) {
+        return nullptr;
+    }
+    auto handoff = std::move(g_queue.front());
+    g_queue.pop_front();
+    return handoff;
+}
+
+void SetHandler(std::function<void()> handler) {
+    g_handler = std::move(handler);
+    if (!g_handler) {
+        return;
+    }
+    // Replay a handoff that arrived while the main window was being created.
+    bool pending = false;
+    {
+        std::lock_guard lock(g_mutex);
+        pending = !g_queue.empty();
+    }
+    if (pending) {
+        g_handler();
+    }
+}
+
+void StopServer() {
+    g_handler = nullptr;
+    if (g_registered) {
+        CoRevokeClassObject(g_cookie);
+        g_registered = false;
+    }
+    if (g_host) {
+        DestroyWindow(g_host);
+        g_host = nullptr;
+    }
+    std::lock_guard lock(g_mutex);
+    g_queue.clear();
 }
 
 }  // namespace handoff

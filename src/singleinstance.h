@@ -16,6 +16,10 @@ namespace singleinstance {
 // create the window as usual.
 bool ForwardOrBecomePrimary(const LaunchOptions& options, HINSTANCE instance);
 
+// Creates the receiver without forwarding. Used by windows that were started
+// by console delegation, so a later `67t.exe` launch still joins them.
+void BecomePrimary(HINSTANCE instance);
+
 // Installed by the primary instance before the message loop starts. Requests
 // received earlier are queued and replayed here.
 void SetHandler(std::function<void(std::wstring cwd, std::wstring shell)> handler);

@@ -604,6 +604,12 @@ void TerminalView::paintGrid(HDC dc, const RECT&) {
                 font = italicFont_;
             }
             const COLORREF color = cellForeground(cell);
+            if (run.empty()) {
+                // A new run starts here. Without this, text drawn after a gap
+                // of empty cells reuses the previous run's start offset and is
+                // rendered shifted to the left.
+                runX = x;
+            }
             if (cell.width == 2) {
                 flush();
                 HGDIOBJ saved = SelectObject(dc, font);

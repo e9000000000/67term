@@ -22,7 +22,7 @@ ConPTY shell. Same visual language as [67ed](../67ed).
 - Remembers window placement, font, scrollback, and cursor blink
 - Can register itself as the Windows **default terminal** through the real
   console-delegation COM handoff, so `cmd`, PowerShell, and other console apps
-  open in 67t
+  open in 67t — as tabs when a 67t window is already running
 
 ## Build
 
@@ -96,7 +96,10 @@ cursorBlink=1
 Windows delegates new console sessions to a registered console host
 (`OpenConsole.exe`) and then to a registered terminal via COM. 67t implements
 `ITerminalHandoff3` as an out-of-proc COM local server (`67t.exe -Embedding`),
-attaches to the handed-off ConPTY, and shows it in a normal tab.
+attaches to the handed-off ConPTY, and shows it in a normal tab. While a 67t
+window is running it keeps the COM class registered, so later consoles (for
+example launching a file that opens in Microsoft Edit) open as tabs there; the
+first console starts the window.
 
 Setting this up requires **Windows Terminal to be installed**: 67t uses Windows
 Terminal's `OpenConsole.exe` as the console host and its
@@ -119,7 +122,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests\run-selftest.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File tests\run-bench.ps1
 ```
 
-Measured on this machine: 497 KiB EXE, 18.5 ms to parse and store 10,000 colored
+Measured on this machine: 501 KiB EXE, 18.5 ms to parse and store 10,000 colored
 lines (120x40, 10k scrollback), 5.9 ms for a resize cycle, about 50 MB RSS with
 10k scrollback lines.
 

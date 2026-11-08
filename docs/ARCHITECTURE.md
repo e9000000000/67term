@@ -32,9 +32,10 @@ a receiver.
 
 The receiver must be a normal hidden window, not `HWND_MESSAGE`: message-only
 windows are not visible to `FindWindowW`. Delegated default-terminal launches
-(`-Embedding`) skip forwarding and always create their own window, because each
-delegated console session belongs to one client. `--new-window` performs the
-same opt-out for ordinary launches.
+(`-Embedding`) skip forwarding because they already carry a console handoff, but
+after creating their window they register as the primary instance if none
+exists, so a later ordinary launch joins them. `--new-window` opts out of
+forwarding for ordinary launches.
 
 ## Why ConPTY
 
@@ -110,9 +111,15 @@ Setting 67t as the default writes `HKCU\Console\%%Startup`:
 The previous pair is saved under `HKCU\Software\67t\DefaultTerminal` and restored
 by the menu or `--restore-default-terminal`.
 
-When COM launches `67t.exe -Embedding`, `handoff::RunServer` registers a
-single-use `IClassFactory` for the terminal CLSID and pumps messages. OpenConsole
-calls `ITerminalHandoff3::EstablishPtyHandoff`, which 67t handles by:
+Every 67t window registers an `IClassFactory` for the terminal CLSID with
+`REGCLS_MULTIPLEUSE` and keeps it registered for the window's lifetime, so COM
+hands later delegated consoles to that process instead of launching another
+`67t.exe`. A delegated console therefore opens as a tab in the running window.
+When no window exists, COM launches `67t.exe -Embedding`; `handoff::RunServer`
+registers the class, pumps until the first handoff arrives, and then leaves the
+registration active while the new window runs.
+
+OpenConsole calls `ITerminalHandoff3::EstablishPtyHandoff`, which 67t handles by:
 
 1. Duplicating the signal, reference, server (OpenConsole) and client process
    handles.
@@ -196,6 +203,9 @@ user is scrolled up when lines are trimmed, the viewport offset is adjusted.
 - Cell metrics come from `GetTextExtentPoint32W(L"M")` and `TEXTMETRIC`.
 - Backgrounds are filled in contiguous runs; text is emitted in runs sharing
   foreground and attributes, falling back to single cells around wide glyphs.
+  A run always records its own start column when it restarts after a gap of
+  empty cells; reusing the previous run's offset would draw it shifted left
+  (visible in TUIs such as opencode).
 - Underline and strikethrough are drawn as 1-pixel lines; inverse swaps colors;
   invisible skips glyph drawing; blink is honored at render time.
 - 16 ANSI colors, a 256-color cube, and 24-bit RGB are supported. Default

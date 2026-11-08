@@ -81,6 +81,13 @@ bool CreateHost(HINSTANCE instance) {
     return g_host != nullptr;
 }
 
+// Must be called with the startup mutex held.
+void CreateHostIfNone(HINSTANCE instance) {
+    if (!FindWindowW(kHostClass, nullptr)) {
+        CreateHost(instance);
+    }
+}
+
 }  // namespace
 
 bool ForwardOrBecomePrimary(const LaunchOptions& options, HINSTANCE instance) {
@@ -117,12 +124,24 @@ bool ForwardOrBecomePrimary(const LaunchOptions& options, HINSTANCE instance) {
         // it is shutting down); fall through and open our own window.
     }
 
-    CreateHost(instance);
+    CreateHostIfNone(instance);
     if (mutex) {
         ReleaseMutex(mutex);
         CloseHandle(mutex);
     }
     return false;
+}
+
+void BecomePrimary(HINSTANCE instance) {
+    HANDLE mutex = CreateMutexW(nullptr, FALSE, kMutexName);
+    if (mutex) {
+        WaitForSingleObject(mutex, kMutexTimeoutMs);
+    }
+    CreateHostIfNone(instance);
+    if (mutex) {
+        ReleaseMutex(mutex);
+        CloseHandle(mutex);
+    }
 }
 
 void SetHandler(std::function<void(std::wstring, std::wstring)> handler) {

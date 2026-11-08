@@ -12,7 +12,7 @@ controls, no installer, no menu bar or status bar.
 ## Current state
 
 M0 and M1 are complete, and M2 is partly done. The app builds as one x64
-executable (~490 KiB) and runs real shells through ConPTY. It has: custom dark
+executable (~500 KiB) and runs real shells through ConPTY. It has: custom dark
 title/tab chrome with a burger menu and fixed new-tab button, multiple tabs with
 drag reorder and context menus, a UTF-8 VT parser with 16/256/24-bit color, wide
 characters, alternate screen, scroll regions and scrollback, a GDI renderer with
@@ -28,6 +28,12 @@ Terminal's `OpenConsole.exe` console host and copies its
 `OpenConsoleProxy.dll` to `%APPDATA%\67t` for proxy/stub registration. The menu
 action and the CLI flags save and restore the previous default; no admin rights
 are needed.
+
+Every 67t window keeps its COM class registered with `REGCLS_MULTIPLEUSE`, so
+once a window is running Windows hands it new delegated consoles (for example
+`edit.exe` or a shortcut that starts a console app) and they open as tabs.
+With no window running, COM starts `67t.exe -Embedding`, which opens the first
+window and then serves later handoffs the same way.
 
 Launching 67t again while a window is open forwards the request to that window
 and opens a new tab there (honoring `--cwd` and `--shell`). `--new-window`
@@ -147,7 +153,7 @@ Measure with `67t.exe --bench-startup` and the self-test timings:
 
 Do not regress these without updating the plan and recording numbers.
 
-Latest measured release build: 508,928-byte EXE; 10,000 colored lines parsed and
+Latest measured release build: 513,024-byte EXE; 10,000 colored lines parsed and
 stored in 18.5 ms; resize cycle 5.9 ms; ~50 MB RSS with 10k scrollback lines;
 hidden chrome construction under 1 ms.
 
@@ -194,7 +200,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests\run-selftest.ps1
   `--shell cmd.exe`; the new tab must use them. `--new-window` must start a
   second window.
 - Default terminal: `--set-default-terminal`, then start `cmd.exe` from the Run
-  dialog; it must open in a 67t tab, echo typed input, and exit cleanly. Check
+  dialog while a 67t window is open; it must open as a tab in that window.
+  Repeat with no 67t running: the first console must open a window, and the
+  next one a tab in it. The session must echo typed input and exit cleanly. Check
   the process tree has `OpenConsole.exe` under `svchost.exe`, then run
   `--restore-default-terminal` and confirm `HKCU\Console\%%Startup` is back.
 
@@ -222,6 +230,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests\run-selftest.ps1
   ConPTY uses overlapped reads/writes on its end.
 - The COM server is launched as `67t.exe -Embedding`; it waits up to 15 seconds
   for a handoff, then exits without showing a window if none arrives.
+- The terminal class must be registered with `REGCLS_MULTIPLEUSE` and kept
+  registered for the window's lifetime. Registering single-use (or revoking
+  after the first handoff) makes every later delegated console start a new
+  window instead of a tab.
+- Renderer text runs must record their own start column whenever a run restarts
+  (for example after a gap of empty cells). Reusing the previous run's start
+  offset draws the text shifted left, which is visible in TUIs such as
+  opencode.
 - Single-instance forwarding uses a hidden top-level window (`67tInstanceHost`)
   found with `FindWindowW` plus a named mutex to serialize startup. Message-only
   windows (`HWND_MESSAGE`) are invisible to `FindWindowW`, so the receiver must

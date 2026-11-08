@@ -2,6 +2,7 @@
 
 #include <windows.h>
 
+#include <functional>
 #include <memory>
 
 #include "pty.h"
@@ -15,9 +16,23 @@ extern const CLSID kTerminalClsidValue;
 // True when this process was started by COM for a default-terminal handoff.
 bool IsEmbeddingLaunch();
 
-// Runs a single-use COM class factory for ITerminalHandoff3, pumps messages
-// until one handoff arrives (or the timeout expires), and returns the attached
-// session. COM is left initialized on success so the caller can run the app.
+// Registers the terminal COM class for the lifetime of this process. While the
+// registration exists COM hands new delegated consoles to this process instead
+// of launching another 67t.exe, so they can open as tabs.
+bool StartServer(HINSTANCE instance);
+
+// Bootstrap for `-Embedding`: registers the class, pumps until the first
+// handoff arrives, and returns it. The registration stays active afterwards.
 std::unique_ptr<PtyHandoff> RunServer(HINSTANCE instance);
+
+// Removes one queued handoff, or null when none is waiting.
+std::unique_ptr<PtyHandoff> TakePending();
+
+// Called on the UI thread whenever a handoff arrives (immediately if one is
+// already queued).
+void SetHandler(std::function<void()> handler);
+
+// Revokes the class registration and destroys the hidden host window.
+void StopServer();
 
 }  // namespace handoff

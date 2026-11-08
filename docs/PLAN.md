@@ -31,12 +31,13 @@
 - **M2 in progress.** OSC 7 directories, OSC 52 clipboard writes, SGR mouse,
   Win32 input mode (Ctrl+Backspace/Ctrl+Delete), word/line selection, scrollback
   bar, Shift+PageUp/PageDown, Windows default-terminal registration
-  (`ITerminalHandoff3` COM handoff), and single-instance tab forwarding are done.
-  Remaining: scrollback search, OSC 8 hyperlinks, shell-integration marks, and
-  optional focus/attention polish.
+  (`ITerminalHandoff3` COM handoff, with delegated consoles opening as tabs),
+  and single-instance tab forwarding are done. A renderer bug that shifted text
+  after blank cells left is fixed. Remaining: scrollback search, OSC 8
+  hyperlinks, shell-integration marks, and optional focus/attention polish.
 - **M3 not started.**
 
-Latest measured release build: 508,928 bytes; 10,000 colored lines parsed and
+Latest measured release build: 513,024 bytes; 10,000 colored lines parsed and
 stored in 18.5 ms; resize cycle 5.9 ms; ~50 MB RSS with 10k scrollback lines.
 
 ## Target numbers

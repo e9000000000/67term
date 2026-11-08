@@ -14,6 +14,7 @@
 #include "accel.h"
 #include "commands.h"
 #include "defterm.h"
+#include "handoff.h"
 #include "theme.h"
 #include "util.h"
 #include "windowrect.h"
@@ -324,6 +325,20 @@ void App::openTabFromRequest(const std::wstring& workingDirectory, const std::ws
     SetForegroundWindow(hwnd_);
     if (TermTab* tab = activeTab()) {
         tab->view->focus();
+    }
+}
+
+void App::attachPendingHandoffs() {
+    bool added = false;
+    while (auto handoff = handoff::TakePending()) {
+        addTab(defaultWorkingDirectory(), std::move(handoff));
+        added = true;
+    }
+    if (added) {
+        if (IsIconic(hwnd_)) {
+            ShowWindow(hwnd_, SW_RESTORE);
+        }
+        SetForegroundWindow(hwnd_);
     }
 }
 

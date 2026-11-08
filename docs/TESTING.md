@@ -42,7 +42,7 @@ Reference numbers (this machine, release build):
 
 | Metric | Value |
 |---|---|
-| EXE | 508,928 bytes |
+| EXE | 513,024 bytes |
 | 10,000 lines parse + store | 18.5 ms |
 | Resize cycle (100x30 → 140x45 → 120x40) | 5.9 ms |
 | RSS with 10k scrollback lines | ~50 MB |

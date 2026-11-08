@@ -123,6 +123,17 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         return 1;
     }
 
+    // Stay registered as the Windows terminal delegate so console apps that
+    // Windows starts later open here as tabs. An embedding launch already
+    // registered itself to receive its first handoff.
+    handoff::StartServer(instance);
+    if (embedding) {
+        // A window opened by console delegation should also accept a later
+        // ordinary `67t.exe` launch as a tab.
+        singleinstance::BecomePrimary(instance);
+    }
+
+    handoff::SetHandler([&app] { app.attachPendingHandoffs(); });
     singleinstance::SetHandler(
         [&app](std::wstring cwd, std::wstring shell) {
             app.openTabFromRequest(cwd, shell);
@@ -130,6 +141,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
 
     const int result = app.run();
     singleinstance::Shutdown();
+    handoff::StopServer();
 
     CoUninitialize();
     return result;
