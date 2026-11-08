@@ -29,6 +29,11 @@ Terminal's `OpenConsole.exe` console host and copies its
 action and the CLI flags save and restore the previous default; no admin rights
 are needed.
 
+Launching 67t again while a window is open forwards the request to that window
+and opens a new tab there (honoring `--cwd` and `--shell`). `--new-window`
+opts out and starts a second window; delegated default-terminal sessions are
+always their own window.
+
 Known gaps: scrollback search, split panes, OSC 8 hyperlinks, shell-integration
 marks, and restoring tabs across restarts. Read `docs/PLAN.md` for milestones and
 `docs/ARCHITECTURE.md` for the design.
@@ -57,13 +62,16 @@ build\67t.exe --cwd C:\src          # start directory
 build\67t.exe C:\src                # a directory argument becomes the start dir
 build\67t.exe --set-default-terminal     # make 67t the Windows default terminal
 build\67t.exe --restore-default-terminal # restore the saved previous default
+build\67t.exe --new-window           # force a separate window
 build\67t.exe --help
 ```
 
 `--set-default-terminal` and `--restore-default-terminal` write a status line to
 `--log <path>` when one is given; otherwise they show a message box.
 
-Every launch is its own window; there is no single-instance handoff.
+A second launch forwards its working directory and optional shell to the running
+window and opens a new tab. `--new-window` forces a separate window. Delegated
+default-terminal sessions are always separate windows.
 
 ## Layout
 
@@ -79,6 +87,7 @@ src/
   theme.h           palette, metrics, DPI helpers
   util.*            UTF conversions, paths, errors, dark-mode helpers
   settings.*        settings.ini and window-placement persistence
+  singleinstance.*  forward a second launch to the running window as a new tab
   pty.*             ConPTY creation, attached sessions, reader/writer threads, resize
   defterm.*         default-terminal registry setup, proxy install, set/restore
   handoff.*         COM local server for ITerminalHandoff3 (default terminal)
@@ -138,7 +147,7 @@ Measure with `67t.exe --bench-startup` and the self-test timings:
 
 Do not regress these without updating the plan and recording numbers.
 
-Latest measured release build: 502,784-byte EXE; 10,000 colored lines parsed and
+Latest measured release build: 508,928-byte EXE; 10,000 colored lines parsed and
 stored in 18.5 ms; resize cycle 5.9 ms; ~50 MB RSS with 10k scrollback lines;
 hidden chrome construction under 1 ms.
 
@@ -180,6 +189,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests\run-selftest.ps1
   arrows in a REPL, mouse
   reporting (`more`, vim if installed), DPI 125/150/200%, close tab while a
   process runs, exit the shell and restart the tab.
+- Single instance: run `67t.exe` while a window is open; it must exit silently
+  and add a tab to the existing window. Repeat with `--cwd C:\Windows` and
+  `--shell cmd.exe`; the new tab must use them. `--new-window` must start a
+  second window.
 - Default terminal: `--set-default-terminal`, then start `cmd.exe` from the Run
   dialog; it must open in a 67t tab, echo typed input, and exit cleanly. Check
   the process tree has `OpenConsole.exe` under `svchost.exe`, then run
@@ -209,3 +222,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests\run-selftest.ps1
   ConPTY uses overlapped reads/writes on its end.
 - The COM server is launched as `67t.exe -Embedding`; it waits up to 15 seconds
   for a handoff, then exits without showing a window if none arrives.
+- Single-instance forwarding uses a hidden top-level window (`67tInstanceHost`)
+  found with `FindWindowW` plus a named mutex to serialize startup. Message-only
+  windows (`HWND_MESSAGE`) are invisible to `FindWindowW`, so the receiver must
+  stay a normal hidden window.

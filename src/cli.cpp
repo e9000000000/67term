@@ -60,6 +60,8 @@ LaunchOptions ParseOptions(const std::vector<std::wstring>& arguments) {
             options.setDefaultTerminal = true;
         } else if (_wcsicmp(arg.c_str(), L"--restore-default-terminal") == 0) {
             options.restoreDefaultTerminal = true;
+        } else if (_wcsicmp(arg.c_str(), L"--new-window") == 0) {
+            options.newWindow = true;
         } else if (_wcsicmp(arg.c_str(), L"--help") == 0 || _wcsicmp(arg.c_str(), L"-h") == 0 ||
                    _wcsicmp(arg.c_str(), L"/?") == 0) {
             options.help = true;
@@ -111,6 +113,7 @@ std::wstring UsageText() {
            L"      --bench-startup     measure hidden chrome construction\n"
            L"      --set-default-terminal   make 67t the Windows default terminal\n"
            L"      --restore-default-terminal  restore the previous default terminal\n"
+           L"      --new-window        open a separate window instead of a new tab\n"
            L"      --log <path>        write headless output to a file\n"
            L"  -h, --help              show this help\n"
            L"  -v, --version           show the version\n";

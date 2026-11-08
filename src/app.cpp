@@ -268,7 +268,9 @@ int App::indexOfView(HWND view) const {
     return -1;
 }
 
-TermTab& App::addTab(const std::wstring& workingDirectory, std::unique_ptr<PtyHandoff> handoff) {
+TermTab& App::addTab(const std::wstring& workingDirectory, std::unique_ptr<PtyHandoff> handoff,
+                     const std::wstring& shellOverride) {
+    const std::wstring& shell = shellOverride.empty() ? shellCommand_ : shellOverride;
     auto tab = std::make_unique<TermTab>();
     tab->view = std::make_unique<TerminalView>();
     const bool created = tab->view->create(hwnd_, instance_);
@@ -286,7 +288,7 @@ TermTab& App::addTab(const std::wstring& workingDirectory, std::unique_ptr<PtyHa
                              settings_.scrollback);
     const std::wstring hint =
         handoff ? (handoff->title.empty() ? handoff->clientName : handoff->title)
-                : shellDisplayName();
+                : ShellNameFromCommand(shell);
     tab->lastTitle = hint.empty() ? L"Terminal" : hint;
     tabs_.push_back(std::move(tab));
     active_ = static_cast<int>(tabs_.size()) - 1;
@@ -300,7 +302,7 @@ TermTab& App::addTab(const std::wstring& workingDirectory, std::unique_ptr<PtyHa
     } else {
         const std::wstring cwd =
             workingDirectory.empty() ? defaultWorkingDirectory() : workingDirectory;
-        if (!added.view->start(shellCommand_, cwd, shellDisplayName())) {
+        if (!added.view->start(shell, cwd, hint)) {
             added.exited = true;
         }
     }
@@ -308,6 +310,21 @@ TermTab& App::addTab(const std::wstring& workingDirectory, std::unique_ptr<PtyHa
     updateTitle();
     added.view->focus();
     return added;
+}
+
+void App::openTabFromRequest(const std::wstring& workingDirectory, const std::wstring& shell) {
+    std::wstring cwd = workingDirectory;
+    if (cwd.empty() || !IsDirectory(cwd)) {
+        cwd = defaultWorkingDirectory();
+    }
+    addTab(cwd, nullptr, shell);
+    if (IsIconic(hwnd_)) {
+        ShowWindow(hwnd_, SW_RESTORE);
+    }
+    SetForegroundWindow(hwnd_);
+    if (TermTab* tab = activeTab()) {
+        tab->view->focus();
+    }
 }
 
 void App::selectTab(int index) {
@@ -407,7 +424,7 @@ void App::newWindow() {
     if (length == 0 || length >= std::size(exe)) {
         return;
     }
-    std::wstring command = L"\"" + std::wstring(exe, length) + L"\"";
+    std::wstring command = L"\"" + std::wstring(exe, length) + L"\" --new-window";
     std::wstring cwd;
     if (TermTab* tab = activeTab()) {
         cwd = tab->view->workingDirectory();

@@ -14,6 +14,7 @@
 #include "handoff.h"
 #include "headless.h"
 #include "pty.h"
+#include "singleinstance.h"
 #include "util.h"
 
 namespace {
@@ -93,6 +94,15 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         return 1;
     }
 
+    // A second launch joins the running window as a new tab, unless the caller
+    // explicitly asks for a separate window. Delegated default-terminal
+    // sessions (embedding) are always their own window.
+    if (!embedding && !options.newWindow) {
+        if (singleinstance::ForwardOrBecomePrimary(options, instance)) {
+            return 0;
+        }
+    }
+
     EnableDarkModeForApp();
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     crashlog::Install();
@@ -113,7 +123,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         return 1;
     }
 
+    singleinstance::SetHandler(
+        [&app](std::wstring cwd, std::wstring shell) {
+            app.openTabFromRequest(cwd, shell);
+        });
+
     const int result = app.run();
+    singleinstance::Shutdown();
 
     CoUninitialize();
     return result;

@@ -17,7 +17,24 @@ One process owns one window, any number of tabs, and one ConPTY session per tab.
 
 Closing a tab destroys its view and closes its pseudo console, which ends the
 shell. There is no daemon and no network listener. The only cross-process
-handoff is the optional Windows default-terminal COM delegation described below.
+handoffs are single-instance tab forwarding and the optional Windows
+default-terminal COM delegation described below.
+
+## Single instance
+
+The first process in a session creates a hidden top-level receiver window
+(class `67tInstanceHost`, `WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE`). A later launch
+finds it with `FindWindowW` and sends `WM_COPYDATA` containing the requested
+working directory and optional shell command. The receiver opens a new tab and
+brings the window to the foreground. Startup is serialized with the named mutex
+`Local\67t.SingleInstance.7A1B`, so two simultaneous launches cannot both create
+a receiver.
+
+The receiver must be a normal hidden window, not `HWND_MESSAGE`: message-only
+windows are not visible to `FindWindowW`. Delegated default-terminal launches
+(`-Embedding`) skip forwarding and always create their own window, because each
+delegated console session belongs to one client. `--new-window` performs the
+same opt-out for ordinary launches.
 
 ## Why ConPTY
 

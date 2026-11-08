@@ -9,6 +9,8 @@ ConPTY shell. Same visual language as [67ed](../67ed).
 - Dark chrome: compact title/tab row with a burger menu and fixed new-tab button
 - Real PowerShell / cmd / any console program, UTF-8 VT input and output
 - Tabs with drag reorder, close buttons, OSC titles
+- Launching 67t again opens a tab in the running window (`--new-window` for a
+  separate window)
 - 10,000-line scrollback (configurable), wheel and keyboard scrolling
 - 16/256/24-bit color, bold/italic/underline/strike, cursor styles
 - Selection, copy/paste, bracketed paste, mouse reporting, IME input
@@ -43,10 +45,15 @@ build\67t.exe --cwd C:\src
 build\67t.exe C:\src                # a directory argument sets the start dir
 build\67t.exe --set-default-terminal     # make 67t the Windows default terminal
 build\67t.exe --restore-default-terminal # restore the previous setting
+build\67t.exe --new-window           # force a separate window
 ```
 
-The same two actions are in the burger menu: **Make 67t the Default Terminal**
-and **Restore Previous Default Terminal**.
+A second launch adds a tab to the window that is already open (`--cwd` and
+`--shell` are honored). Use `--new-window`, or **New Window** in the burger menu
+(`Ctrl+Shift+N`), to get a separate window.
+
+The two default-terminal actions are in the burger menu: **Make 67t the Default
+Terminal** and **Restore Previous Default Terminal**.
 
 ## Shortcuts
 
@@ -112,7 +119,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests\run-selftest.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File tests\run-bench.ps1
 ```
 
-Measured on this machine: 491 KiB EXE, 18.5 ms to parse and store 10,000 colored
+Measured on this machine: 497 KiB EXE, 18.5 ms to parse and store 10,000 colored
 lines (120x40, 10k scrollback), 5.9 ms for a resize cycle, about 50 MB RSS with
 10k scrollback lines.
 

@@ -29,6 +29,9 @@ public:
     int run();
     HWND hwnd() const { return hwnd_; }
 
+    // Opens a tab for a launch forwarded by a second instance of 67t.
+    void openTabFromRequest(const std::wstring& workingDirectory, const std::wstring& shell);
+
 private:
     static LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
     LRESULT handleMessage(UINT message, WPARAM wParam, LPARAM lParam);
@@ -46,7 +49,8 @@ private:
     int activeIndex() const { return active_; }
     int indexOfView(HWND view) const;
     TermTab& addTab(const std::wstring& workingDirectory,
-                    std::unique_ptr<PtyHandoff> handoff = nullptr);
+                    std::unique_ptr<PtyHandoff> handoff = nullptr,
+                    const std::wstring& shellOverride = {});
     void closeTab(int index);
     void closeOtherTabs(int keep);
     void closeAllTabs();

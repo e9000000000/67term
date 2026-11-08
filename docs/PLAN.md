@@ -5,8 +5,9 @@
 - **Native Windows terminal emulator**, x64, Windows 10 1809+/Windows 11.
   No browser, no webview, no HTTP.
 - **C++20 + Win32 + GDI + ConPTY**, static CRT, single EXE.
-- **Every launch is its own window.** No single-instance gate (terminals are
-  commonly opened side by side).
+- **Second launches join the running window as a new tab** and honor `--cwd` and
+  `--shell`; `--new-window` forces a second window. Delegated default-terminal
+  sessions are always their own window.
 - **Tabs** are in the compact custom title row, matching 67ed.
 - Each tab owns one ConPTY session, one child shell, one screen buffer, and one
   terminal child window.
@@ -29,12 +30,13 @@
   and shell exit/restart.
 - **M2 in progress.** OSC 7 directories, OSC 52 clipboard writes, SGR mouse,
   Win32 input mode (Ctrl+Backspace/Ctrl+Delete), word/line selection, scrollback
-  bar, Shift+PageUp/PageDown, and Windows default-terminal registration
-  (`ITerminalHandoff3` COM handoff) are done. Remaining: scrollback search, OSC 8
-  hyperlinks, shell-integration marks, and optional focus/attention polish.
+  bar, Shift+PageUp/PageDown, Windows default-terminal registration
+  (`ITerminalHandoff3` COM handoff), and single-instance tab forwarding are done.
+  Remaining: scrollback search, OSC 8 hyperlinks, shell-integration marks, and
+  optional focus/attention polish.
 - **M3 not started.**
 
-Latest measured release build: 502,784 bytes; 10,000 colored lines parsed and
+Latest measured release build: 508,928 bytes; 10,000 colored lines parsed and
 stored in 18.5 ms; resize cycle 5.9 ms; ~50 MB RSS with 10k scrollback lines.
 
 ## Target numbers

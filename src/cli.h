@@ -13,6 +13,7 @@ struct LaunchOptions {
     bool benchStartup = false;
     bool setDefaultTerminal = false;
     bool restoreDefaultTerminal = false;
+    bool newWindow = false;
     bool help = false;
     bool version = false;
     int benchLines = 10000;

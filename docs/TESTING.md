@@ -42,7 +42,7 @@ Reference numbers (this machine, release build):
 
 | Metric | Value |
 |---|---|
-| EXE | 502,784 bytes |
+| EXE | 508,928 bytes |
 | 10,000 lines parse + store | 18.5 ms |
 | Resize cycle (100x30 → 140x45 → 120x40) | 5.9 ms |
 | RSS with 10k scrollback lines | ~50 MB |
@@ -64,6 +64,10 @@ Reference numbers (this machine, release build):
 - Drop a folder on the window: a new tab opens there.
 - Close the app and relaunch: size/position and settings restore.
 - Close a tab while a long-running process is active; no orphan child remains.
+- With a window open, launch `67t.exe` again: it exits and adds a tab to the
+  running window. `67t.exe --cwd C:\Windows` opens the tab there, and
+  `--shell cmd.exe` starts cmd in that tab. `--new-window` creates a second
+  window instead. Close every window and launch again: a fresh primary starts.
 - Default terminal: burger menu → **Make 67t the Default Terminal**, then launch
   `cmd.exe` from the Run dialog. It must open in a 67t tab (title `cmd`), show the
   prompt, echo typed commands, and close without leaving a 67t process behind.
