@@ -15,6 +15,7 @@
 #include "commands.h"
 #include "defterm.h"
 #include "handoff.h"
+#include "shellintegration.h"
 #include "theme.h"
 #include "util.h"
 #include "windowrect.h"
@@ -121,7 +122,7 @@ bool App::create(const LaunchOptions& options, std::unique_ptr<PtyHandoff> hando
     options_ = options;
     EnsureDirectory(DataDirectory());
     LoadSettings(settings_);
-    shellCommand_ = chooseShell();
+    shellCommand_ = shellint::Prepare(chooseShell());
 
     backgroundBrush_ = CreateSolidBrush(theme::kBg);
     if (!backgroundBrush_) {
@@ -271,7 +272,8 @@ int App::indexOfView(HWND view) const {
 
 TermTab& App::addTab(const std::wstring& workingDirectory, std::unique_ptr<PtyHandoff> handoff,
                      const std::wstring& shellOverride) {
-    const std::wstring& shell = shellOverride.empty() ? shellCommand_ : shellOverride;
+    const std::wstring shell =
+        shellint::Prepare(shellOverride.empty() ? shellCommand_ : shellOverride);
     auto tab = std::make_unique<TermTab>();
     tab->view = std::make_unique<TerminalView>();
     const bool created = tab->view->create(hwnd_, instance_);

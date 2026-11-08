@@ -42,8 +42,12 @@ always their own window.
 
 New tabs (the plus button, `Ctrl+Shift+T`, and Duplicate Tab) start in the
 active tab's directory. OSC 7 is used when the shell reports it; otherwise the
-shell process's current directory is read from its PEB, so shells without
-integration still inherit the directory.
+shell process's current directory is read from its PEB (cmd updates this, so it
+works without integration). PowerShell does **not** update its process
+directory on `cd`, so 67t installs a small PowerShell integration script
+(`%APPDATA%\67t\shell-integration.ps1`) that wraps the existing prompt and emits
+OSC 7 when the location changes. Shells that already pass `-Command`/`-File`
+are left untouched.
 
 Unicode: astral characters are stored as surrogate pairs in one wide cell,
 emoji-presentation code points are width 2, and VS16 (`U+FE0F`) promotes
@@ -109,6 +113,7 @@ src/
   util.*            UTF conversions, paths, errors, dark-mode helpers
   settings.*        settings.ini and window-placement persistence
   singleinstance.*  forward a second launch to the running window as a new tab
+  shellintegration.* PowerShell OSC 7 prompt integration for tab directories
   pty.*             ConPTY creation, attached sessions, reader/writer threads, resize
   defterm.*         default-terminal registry setup, proxy install, set/restore
   handoff.*         COM local server for ITerminalHandoff3 (default terminal)
@@ -168,7 +173,7 @@ Measure with `67t.exe --bench-startup` and the self-test timings:
 
 Do not regress these without updating the plan and recording numbers.
 
-Latest measured release build: 541,696-byte EXE; 10,000 colored lines parsed and
+Latest measured release build: 553,984-byte EXE; 10,000 colored lines parsed and
 stored in 18.5 ms; resize cycle 5.9 ms; ~50 MB RSS with 10k scrollback lines;
 hidden chrome construction under 1 ms.
 
@@ -203,8 +208,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests\run-selftest.ps1
   responses, scrollback trimming, resize, key encoding, mouse/paste encoding,
   Win32 input-mode records, ConPTY spawn + echo + exit, process current
   directory, live PowerShell Ctrl+Backspace editing, emoji input, the
-  replacement-glyph cleanup, and symbol/CJK font fallback coverage. Results are
-  JSON-ish lines; expect `summary passed=101 failed=0`.
+  replacement-glyph cleanup, PowerShell OSC 7 integration (including `cd`),
+  and symbol/CJK font fallback coverage. Results are JSON-ish lines; expect
+  `summary passed=105 failed=0`.
 - `--bench [lines]`: parser/screen microbenchmarks on synthetic colored output.
 - `--bench-startup`: hidden chrome construction timing and RSS.
 - Manual smoke: PowerShell and cmd tabs, `dir`, `git status`, colors, Unicode,
@@ -275,7 +281,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests\run-selftest.ps1
   box. Cache `GetFontUnicodeRanges` per font and select an explicit fallback;
   `GLYPHSET` covers only the BMP, so astral characters use the emoji face.
 - `ProcessCurrentDirectory` reads `RTL_USER_PROCESS_PARAMETERS` through the
-  PEB; x64 uses offsets 0x20/0x38 and WOW64 targets use 0x10/0x24.
+  PEB; x64 uses offsets 0x20/0x38 and WOW64 targets use 0x10/0x24. cmd updates
+  it on `cd`; Windows PowerShell does not, so it needs the OSC 7 wrapper.
+- The PowerShell integration script must wrap (not replace) the user's prompt
+  and emit OSC 7 only when the location changes, so PSReadLine redraws are not
+  disturbed. Do not inject it into shells that already use `-Command`, `-File`
+  or `-EncodedCommand`.
 - Single-instance forwarding uses a hidden top-level window (`67tInstanceHost`)
   found with `FindWindowW` plus a named mutex to serialize startup. Message-only
   windows (`HWND_MESSAGE`) are invisible to `FindWindowW`, so the receiver must

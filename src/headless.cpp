@@ -12,6 +12,7 @@
 #include "input.h"
 #include "menubar.h"
 #include "pty.h"
+#include "shellintegration.h"
 #include "tabbar.h"
 #include "terminal.h"
 #include "theme.h"
@@ -589,6 +590,51 @@ void TestWin32Input(Harness& h) {
     session.close();
 }
 
+void TestShellIntegration(Harness& h) {
+    const std::wstring command = shellint::Prepare(L"powershell.exe -NoLogo");
+    h.check(command.find(L"-Command") != std::wstring::npos,
+            L"shell integration: PowerShell command prepared");
+    h.check(shellint::Prepare(L"cmd.exe /d") == L"cmd.exe /d",
+            L"shell integration: other shells untouched");
+    if (!PtySession::available()) {
+        return;
+    }
+
+    PtySession session;
+    std::wstring error;
+    if (!session.start(command, ExeDirectory(), 100, 30, nullptr, error)) {
+        h.check(false, L"shell integration: session start", error);
+        return;
+    }
+    vt::Terminal terminal(100, 30, 1000);
+    terminal.setResponseCallback([&](std::string text) { session.write(text); });
+    const auto pump = [&]() {
+        std::string data;
+        while (session.drain(data)) {
+            terminal.feed(data);
+        }
+    };
+
+    ULONGLONG deadline = GetTickCount64() + 8000;
+    while (GetTickCount64() < deadline && terminal.workingDirectory().empty()) {
+        pump();
+        Sleep(20);
+    }
+    h.check(!terminal.workingDirectory().empty(), L"shell integration: initial OSC 7",
+            terminal.workingDirectory());
+
+    session.write("cd C:\\Windows\r");
+    deadline = GetTickCount64() + 6000;
+    while (GetTickCount64() < deadline &&
+           !PathsEqual(terminal.workingDirectory(), L"C:\\Windows")) {
+        pump();
+        Sleep(20);
+    }
+    h.check(PathsEqual(terminal.workingDirectory(), L"C:\\Windows"),
+            L"shell integration: OSC 7 follows cd", terminal.workingDirectory());
+    session.close();
+}
+
 LRESULT CALLBACK HiddenHostProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
     return DefWindowProcW(hwnd, message, wParam, lParam);
 }
@@ -640,6 +686,7 @@ int RunSelfTest(const std::wstring& logPath) {
     TestInput(harness);
     TestPty(harness);
     TestWin32Input(harness);
+    TestShellIntegration(harness);
     TestStartupComponents(harness);
 
     harness.summary();
