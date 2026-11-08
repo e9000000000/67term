@@ -163,6 +163,7 @@ bool App::create(const LaunchOptions& options, std::unique_ptr<PtyHandoff> hando
     if (!tabBar_.create(hwnd_, instance_)) {
         return false;
     }
+    applyUiFont();
 
     bool placed = false;
     if (settings_.hasWindow) {
@@ -528,6 +529,7 @@ void App::showBurgerMenu(int section) {
         add(kCmdZoomOut, L"Zoom Out", L"Ctrl+-", has);
         add(kCmdZoomReset, L"Reset Zoom", L"Ctrl+0", has);
         add(kCmdFont, L"Font...", L"", true);
+        add(kCmdUiFont, L"Interface Font...", L"Ctrl+Shift+U", true);
         separator();
         add(kCmdToggleFullscreen, L"Full Screen", L"F11", true, state.fullscreen);
         add(kCmdToggleCursorBlink, L"Blinking Cursor", L"", true, state.cursorBlink);
@@ -691,6 +693,9 @@ void App::onCommand(UINT id) {
     case kCmdFont:
         showFontDialog();
         break;
+    case kCmdUiFont:
+        showUiFontDialog();
+        break;
     case kCmdSetDefaultTerminal: {
         if (defterm::IsDefault()) {
             MessageBoxW(hwnd_, L"67t is already the default terminal.",
@@ -832,6 +837,43 @@ void App::showFontDialog() {
     applySettingsToAllViews();
     layout();
     SaveSettings(settings_);
+}
+
+void App::showUiFontDialog() {
+    LOGFONTW logFont{};
+    logFont.lfHeight = -MulDiv(std::max(6, settings_.uiFontSize), static_cast<int>(dpi_), 72);
+    logFont.lfWeight = FW_NORMAL;
+    logFont.lfCharSet = DEFAULT_CHARSET;
+    logFont.lfQuality = CLEARTYPE_QUALITY;
+    logFont.lfPitchAndFamily = DEFAULT_PITCH | FF_DONTCARE;
+    lstrcpynW(logFont.lfFaceName, settings_.uiFontFamily.c_str(), LF_FACESIZE);
+
+    CHOOSEFONTW choose{};
+    choose.lStructSize = sizeof(choose);
+    choose.hwndOwner = hwnd_;
+    choose.lpLogFont = &logFont;
+    choose.iPointSize = settings_.uiFontSize * 10;
+    choose.Flags = CF_SCREENFONTS | CF_INITTOLOGFONTSTRUCT | CF_NOVERTFONTS;
+    if (!ChooseFontW(&choose)) {
+        return;
+    }
+
+    int size = choose.iPointSize / 10;
+    if (size <= 0) {
+        size = MulDiv(-logFont.lfHeight, 72, static_cast<int>(dpi_));
+    }
+    settings_.uiFontSize = std::clamp(size, 6, 36);
+    if (logFont.lfFaceName[0] != L'\0') {
+        settings_.uiFontFamily = logFont.lfFaceName;
+    }
+    applyUiFont();
+    SaveSettings(settings_);
+}
+
+void App::applyUiFont() {
+    tabBar_.setFont(settings_.uiFontFamily, settings_.uiFontSize);
+    menuBar_.setFont(settings_.uiFontFamily, settings_.uiFontSize);
+    layout();
 }
 
 void App::showAbout() {

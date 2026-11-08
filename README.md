@@ -22,7 +22,8 @@ ConPTY shell. Same visual language as [67ed](../67ed).
 - Win32 input mode: Ctrl+Backspace, Ctrl+Delete, Alt+arrows and the rest of the
   Windows key space behave like Windows Terminal
 - Resize reflows the ConPTY grid; close a tab and its shell is terminated
-- Font chooser (fixed-pitch, size), font zoom, fullscreen
+- Terminal font chooser (fixed-pitch, size), separate interface font for the
+  tabs and menus, font zoom, fullscreen
 - Remembers window placement, font, scrollback, and cursor blink
 - Can register itself as the Windows **default terminal** through the real
   console-delegation COM handoff, so `cmd`, PowerShell, and other console apps
@@ -70,6 +71,7 @@ Terminal** and **Restore Previous Default Terminal**.
 | Copy / paste | `Ctrl+Shift+C` / `Ctrl+Shift+V` |
 | Select all | `Ctrl+Shift+A` |
 | Find in scrollback | `Ctrl+Shift+F` |
+| Interface font | `Ctrl+Shift+U` |
 | Clear scrollback | `Ctrl+Shift+K` |
 | Next / previous tab | `Ctrl+Tab` / `Ctrl+Shift+Tab` |
 | Go to tab 1–9 | `Ctrl+1` … `Ctrl+9` |
@@ -80,7 +82,8 @@ Terminal** and **Restore Previous Default Terminal**.
 
 `Ctrl+C`, `Ctrl+D`, `Ctrl+Z`, `Ctrl+Backspace`, `Ctrl+Delete`, arrows, function
 keys, and the rest of the normal keyboard go to the shell. `View > Font...` picks
-the terminal font and size.
+the terminal font and size; `View > Interface Font...` (or `Ctrl+Shift+U`) picks
+the font for the title/tab strip and menus.
 
 ## Settings
 
@@ -91,6 +94,8 @@ Settings live in `%APPDATA%\67t\settings.ini` (or `.\state\settings.ini` when
 [67t]
 font=Cascadia Mono
 fontSize=16
+uiFont=Segoe UI
+uiFontSize=9
 shell=powershell.exe -NoLogo
 scrollback=10000
 cursorBlink=1

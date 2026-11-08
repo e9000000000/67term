@@ -81,7 +81,8 @@ the PTY, and closing the tab kills the shell.
 - New/close/reorder tabs, tab context menu, tab titles from OSC 0/2.
 - Ctrl+Shift+T/W, Ctrl+Tab cycling, duplicate tab in same directory.
 - Font size zoom, fullscreen (F11), window placement persistence.
-- Settings INI: shell, font family/size, scrollback, cursor blink.
+- Settings INI: shell, terminal font family/size, interface font family/size,
+  scrollback, cursor blink.
 - Drag-and-drop folder opens a tab there; file drop inserts the path.
 - Process-exit state with a restart action.
 

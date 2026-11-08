@@ -10,7 +10,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests\run-startup.ps1
 ```
 
 The self-test creates no visible window. It writes `build\selftest.log` and exits
-non-zero on a failure. Current check count: **115** (`summary passed=115 failed=0`).
+non-zero on a failure. Current check count: **117** (`summary passed=117 failed=0`).
 
 Coverage:
 
@@ -18,6 +18,7 @@ Coverage:
 - UTF-8 encode/decode, wide and combining character widths
 - emoji (astral) cells, VS16 promotion, modifiers, zero-width marks on wide lead cells
 - explicit symbol/CJK font fallback coverage for tofu-prone code points
+- interface-font changes grow the tab bar and menu chrome instead of clipping
 - screen print, CR/LF, CUP, erase, SGR indexed/truecolor/attributes, wide cells
 - OSC title, OSC 7 directory, device attributes, cursor position report
 - bracketed paste, application cursor keys, mouse modes, alternate screen
@@ -71,6 +72,9 @@ Reference numbers (this machine, release build):
   reported size.
 - Run a mouse-aware program if available (`more`, `vim`), verify clicks/wheel.
 - DPI 125/150/200%: font and grid stay aligned; F11 toggles full screen.
+- `View > Interface Font...` (`Ctrl+Shift+U`): pick a larger font and confirm the
+  tab strip and popup menus grow, stay readable, and persist across restarts.
+  The terminal font and grid must be unchanged.
 - Drop a folder on the window: a new tab opens there.
 - Close the app and relaunch: size/position and settings restore.
 - Close a tab while a long-running process is active; no orphan child remains.

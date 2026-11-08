@@ -53,6 +53,11 @@ bool LoadSettings(Settings& settings) {
         settings.fontFamily = L"Cascadia Mono";
     }
     settings.fontSize = std::clamp(ReadInt(path, L"fontSize", 16), 8, 72);
+    settings.uiFontFamily = ReadString(path, L"uiFont", L"Segoe UI");
+    if (settings.uiFontFamily.empty()) {
+        settings.uiFontFamily = L"Segoe UI";
+    }
+    settings.uiFontSize = std::clamp(ReadInt(path, L"uiFontSize", 9), 6, 36);
     settings.shell = ReadString(path, L"shell", L"");
     settings.scrollback = std::clamp(ReadInt(path, L"scrollback", 10000), 0, 100000);
     settings.cursorBlink = ReadInt(path, L"cursorBlink", 1) != 0;
@@ -80,6 +85,8 @@ bool SaveSettings(const Settings& settings) {
     DeleteFileW(temp.c_str());
     WriteValue(temp, L"font", settings.fontFamily);
     WriteValue(temp, L"fontSize", std::to_wstring(settings.fontSize));
+    WriteValue(temp, L"uiFont", settings.uiFontFamily);
+    WriteValue(temp, L"uiFontSize", std::to_wstring(settings.uiFontSize));
     WriteValue(temp, L"shell", settings.shell);
     WriteValue(temp, L"scrollback", std::to_wstring(settings.scrollback));
     WriteValue(temp, L"cursorBlink", settings.cursorBlink ? L"1" : L"0");

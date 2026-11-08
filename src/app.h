@@ -75,6 +75,8 @@ private:
     void saveWindowPlacement();
     void showAbout();
     void showFontDialog();
+    void showUiFontDialog();
+    void applyUiFont();
     void openSettingsFolder();
     void showViewContextMenu(HWND view, POINT screenPoint);
     void showTabContextMenu(int index, POINT screenPoint);

@@ -688,6 +688,12 @@ void TestStartupComponents(Harness& h) {
         const bool viewCreated = view.create(host, wc.hInstance);
         h.check(chrome, L"startup: chrome creates");
         h.check(viewCreated, L"startup: terminal view creates");
+        tabs.setFont(L"Segoe UI", 20);
+        menu.setFont(L"Segoe UI", 20);
+        h.check(tabs.preferredHeight(host) >= theme::Scale(20 + 19, DpiOfWindow(host)),
+                L"startup: tab bar grows with interface font");
+        h.check(menu.preferredHeight(host) >= theme::Scale(20 + 19, DpiOfWindow(host)),
+                L"startup: menu grows with interface font");
         menu.layout(0, 0, 1200, 28);
         tabs.layout(0, 0, 1200, 28);
         view.layout(0, 28, 1200, 724);

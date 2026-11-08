@@ -17,8 +17,9 @@ title/tab chrome with a burger menu and fixed new-tab button, multiple tabs with
 drag reorder and context menus, a UTF-8 VT parser with 16/256/24-bit color, wide
 characters, alternate screen, scroll regions and scrollback, a GDI renderer with
 cursor styles and selection, keyboard/mouse/IME input (including Win32 input
-mode), bracketed paste, shell-exit detection and restart, font settings, font
-zoom, fullscreen, settings/window persistence, drag-and-drop, OSC titles, OSC 7
+mode), bracketed paste, shell-exit detection and restart, font settings, a
+separate interface font for the tab/menu chrome, font zoom, fullscreen,
+settings/window persistence, drag-and-drop, OSC titles, OSC 7
 working directories and OSC 52 clipboard writes.
 
 67t can also register itself as the Windows **default terminal**. It implements
@@ -214,9 +215,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests\run-selftest.ps1
   Win32 input-mode records, ConPTY spawn + echo + exit, process current
   directory, live PowerShell Ctrl+Backspace editing, emoji input, the
   replacement-glyph cleanup, PowerShell OSC 7 integration (including `cd`),
-  scrollback search and absolute buffer coordinates, and symbol/CJK font
-  fallback coverage. Results are JSON-ish lines; expect
-  `summary passed=115 failed=0`.
+  scrollback search and absolute buffer coordinates, interface-font chrome
+  metrics, and symbol/CJK font fallback coverage. Results are JSON-ish lines;
+  expect `summary passed=117 failed=0`.
 - `--bench [lines]`: parser/screen microbenchmarks on synthetic colored output.
 - `--bench-startup`: hidden chrome construction timing and RSS.
 - Manual smoke: PowerShell and cmd tabs, `dir`, `git status`, colors, Unicode,

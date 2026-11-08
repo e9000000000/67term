@@ -38,6 +38,7 @@ enum : unsigned int {
     kCmdMenuHelp,
     kCmdOpenSettings,
     kCmdFont,
+    kCmdUiFont,
     kCmdSetDefaultTerminal,
     kCmdRestoreDefaultTerminal,
     kCmdTabBase = 3000,

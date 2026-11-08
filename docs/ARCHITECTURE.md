@@ -273,7 +273,11 @@ Reuses the 67ed visual language exactly:
 - Burger opens an owner-drawn dark popup; `File`/`Edit`/`View`/`Help` items open
   the corresponding section anchored under the burger. `Alt+F/E/V/H` do the same.
 - `View > Font...` opens the fixed-pitch font chooser and applies family/size to
-  every tab.
+  every tab. `View > Interface Font...` (`Ctrl+Shift+U`) is separate: it picks
+  any screen font for the tab strip and popup menus (`uiFont`/`uiFontSize`) and
+  does not change the terminal grid. `TabBar::preferredHeight`,
+  `MenuBar::preferredHeight` and `popupItemHeight` grow with the interface font
+  so larger sizes do not clip.
 - `WM_NCCALCSIZE` removes the caption while keeping the resize frame;
   `WM_NCHITTEST` makes the title row draggable
 - DWM immersive dark mode on a best-effort basis
@@ -289,6 +293,8 @@ Data directory is `%APPDATA%\67t\`, or `.\state\` in portable mode when
 ```
 font=Cascadia Mono
 fontSize=16
+uiFont=Segoe UI
+uiFontSize=9
 shell=powershell.exe -NoLogo
 scrollback=10000
 cursorBlink=1

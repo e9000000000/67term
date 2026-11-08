@@ -86,9 +86,30 @@ void MenuBar::ensureFont() {
     if (font_) {
         DeleteObject(font_);
     }
-    font_ = CreateFontW(-MulDiv(9, static_cast<int>(dpi_), 72), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-                        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+    font_ = CreateFontW(-MulDiv(fontSize_, static_cast<int>(dpi_), 72), 0, 0, 0, FW_NORMAL, FALSE,
+                        FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, fontFace_.c_str());
+}
+
+void MenuBar::setFont(const std::wstring& face, int points) {
+    const std::wstring nextFace = face.empty() ? L"Segoe UI" : face;
+    points = std::clamp(points, 6, 36);
+    if (points == fontSize_ && _wcsicmp(nextFace.c_str(), fontFace_.c_str()) == 0) {
+        return;
+    }
+    fontFace_ = nextFace;
+    fontSize_ = points;
+    if (font_) {
+        DeleteObject(font_);
+        font_ = nullptr;
+    }
+    ensureFont();
+    if (hwnd_) {
+        RECT client{};
+        GetClientRect(hwnd_, &client);
+        layout(0, 0, client.right, client.bottom);
+    }
+    invalidate();
 }
 
 void MenuBar::layout(int x, int y, int width, int height) {
@@ -117,7 +138,7 @@ void MenuBar::layout(int x, int y, int width, int height) {
 }
 
 int MenuBar::preferredHeight(HWND reference) const {
-    return theme::Scale(28, DpiOfWindow(reference));
+    return theme::Scale(std::max(28, fontSize_ + 19), DpiOfWindow(reference));
 }
 
 void MenuBar::setState(const MenuState& state) {
@@ -162,6 +183,8 @@ void MenuBar::rebuildMenus() {
     view.items.push_back(MakeItem(kCmdZoomIn, L"Zoom In", L"Ctrl++", has));
     view.items.push_back(MakeItem(kCmdZoomOut, L"Zoom Out", L"Ctrl+-", has));
     view.items.push_back(MakeItem(kCmdZoomReset, L"Reset Zoom", L"Ctrl+0", has));
+    view.items.push_back(MakeItem(kCmdFont, L"Font...", L"", true));
+    view.items.push_back(MakeItem(kCmdUiFont, L"Interface Font...", L"Ctrl+Shift+U", true));
     view.items.push_back(MakeItem(kCmdToggleFullscreen, L"Full Screen", L"F11", true,
                                   state_.fullscreen));
     view.items.push_back(MakeSeparator());
@@ -247,7 +270,7 @@ void MenuBar::paint(HDC target) {
 }
 
 int MenuBar::popupItemHeight() const {
-    return theme::Scale(26, dpi_);
+    return theme::Scale(std::max(26, fontSize_ + 17), dpi_);
 }
 
 bool MenuBar::hasActivePopup() const {

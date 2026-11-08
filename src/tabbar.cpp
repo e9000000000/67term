@@ -66,9 +66,28 @@ void TabBar::ensureFont() {
     if (font_) {
         DeleteObject(font_);
     }
-    font_ = CreateFontW(-MulDiv(9, static_cast<int>(dpi_), 72), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-                        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+    font_ = CreateFontW(-MulDiv(fontSize_, static_cast<int>(dpi_), 72), 0, 0, 0, FW_NORMAL, FALSE,
+                        FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, fontFace_.c_str());
+}
+
+void TabBar::setFont(const std::wstring& face, int points) {
+    const std::wstring nextFace = face.empty() ? L"Segoe UI" : face;
+    points = std::clamp(points, 6, 36);
+    if (points == fontSize_ && _wcsicmp(nextFace.c_str(), fontFace_.c_str()) == 0) {
+        return;
+    }
+    fontFace_ = nextFace;
+    fontSize_ = points;
+    if (font_) {
+        DeleteObject(font_);
+        font_ = nullptr;
+    }
+    ensureFont();
+    if (hwnd_) {
+        computeLayout();
+    }
+    invalidate();
 }
 
 void TabBar::setTabs(std::vector<TabVisual> tabs, int active) {
@@ -97,7 +116,7 @@ void TabBar::layout(int x, int y, int width, int height) {
 }
 
 int TabBar::preferredHeight(HWND reference) const {
-    return theme::Scale(theme::kTabHeight, DpiOfWindow(reference));
+    return theme::Scale(std::max(theme::kTabHeight, fontSize_ + 19), DpiOfWindow(reference));
 }
 
 void TabBar::invalidate() {

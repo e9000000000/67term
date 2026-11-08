@@ -12,6 +12,7 @@ HACCEL CreateAppAccelerators() {
         {FVIRTKEY | FCONTROL | FSHIFT, 'V', kCmdPaste},
         {FVIRTKEY | FCONTROL | FSHIFT, 'A', kCmdSelectAll},
         {FVIRTKEY | FCONTROL | FSHIFT, 'F', kCmdFind},
+        {FVIRTKEY | FCONTROL | FSHIFT, 'U', kCmdUiFont},
         {FVIRTKEY | FCONTROL | FSHIFT, 'K', kCmdClearScrollback},
         {FVIRTKEY | FCONTROL | FSHIFT, VK_HOME, kCmdScrollTop},
         {FVIRTKEY | FCONTROL | FSHIFT, VK_END, kCmdScrollBottom},
