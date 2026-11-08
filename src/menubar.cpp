@@ -150,6 +150,7 @@ void MenuBar::rebuildMenus() {
     edit.items.push_back(MakeItem(kCmdPaste, L"Paste", L"Ctrl+Shift+V", running));
     edit.items.push_back(MakeItem(kCmdSelectAll, L"Select All", L"Ctrl+Shift+A", has));
     edit.items.push_back(MakeItem(kCmdClearSelection, L"Clear Selection", L"", state_.hasSelection));
+    edit.items.push_back(MakeItem(kCmdFind, L"Find...", L"Ctrl+Shift+F", has));
     edit.items.push_back(MakeSeparator());
     edit.items.push_back(MakeItem(kCmdScrollTop, L"Scroll to Top", L"Ctrl+Shift+Home", has));
     edit.items.push_back(MakeItem(kCmdScrollBottom, L"Scroll to Bottom", L"Ctrl+Shift+End", has));

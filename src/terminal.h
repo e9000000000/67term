@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <cwctype>
 #include <deque>
 #include <functional>
 #include <string>
@@ -93,6 +94,20 @@ public:
     void setScrollOffset(int offset);
     void scrollBy(int lines);
     void clearScrollback();
+
+    // Absolute buffer coordinates: row 0 is the oldest scrollback line. In the
+    // alternate screen there is no scrollback, so absolute == viewport row.
+    int scrollbackSize() const { return static_cast<int>(scrollback_.size()); }
+    int bufferBase() const { return altActive_ ? 0 : static_cast<int>(scrollback_.size()) - scrollOffset_; }
+    int bufferRow(int viewportY) const { return bufferBase() + viewportY; }
+    const Line* bufferLine(int absoluteRow) const { return combinedLinePtr(absoluteRow); }
+
+    struct SearchMatch {
+        int line = 0;   // absolute buffer row
+        int first = 0;  // first cell column
+        int last = 0;   // last cell column (inclusive)
+    };
+    std::vector<SearchMatch> findText(const std::wstring& query, bool matchCase = false) const;
 
     int cursorX() const { return cursorX_; }
     int cursorY() const { return cursorY_; }

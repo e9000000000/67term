@@ -35,6 +35,11 @@ once a window is running Windows hands it new delegated consoles (for example
 With no window running, COM starts `67t.exe -Embedding`, which opens the first
 window and then serves later handoffs the same way.
 
+Selection is stored in absolute buffer rows, so scrolling keeps the highlight
+anchored to its text instead of the viewport. `Ctrl+Shift+F` opens an inline
+find bar: typing highlights matches across scrollback, Enter/Shift+Enter (or
+F3/Shift+F3) moves between them, and Esc closes it.
+
 Launching 67t again while a window is open forwards the request to that window
 and opens a new tab there (honoring `--cwd` and `--shell`). `--new-window`
 opts out and starts a second window; delegated default-terminal sessions are
@@ -59,8 +64,8 @@ Win32 key records, because a record only holds one UTF-16 code unit. Windows
 PowerShell 5.1 deletes one code unit per Backspace and leaves `U+FFFD`; the view
 detects that replacement glyph and sends one follow-up Backspace.
 
-Known gaps: scrollback search, split panes, OSC 8 hyperlinks, shell-integration
-marks, and restoring tabs across restarts. Read `docs/PLAN.md` for milestones and
+Known gaps: split panes, OSC 8 hyperlinks, shell-integration marks, and
+restoring tabs across restarts. Read `docs/PLAN.md` for milestones and
 `docs/ARCHITECTURE.md` for the design.
 
 ## Build
@@ -173,7 +178,7 @@ Measure with `67t.exe --bench-startup` and the self-test timings:
 
 Do not regress these without updating the plan and recording numbers.
 
-Latest measured release build: 553,984-byte EXE; 10,000 colored lines parsed and
+Latest measured release build: 566,784-byte EXE; 10,000 colored lines parsed and
 stored in 18.5 ms; resize cycle 5.9 ms; ~50 MB RSS with 10k scrollback lines;
 hidden chrome construction under 1 ms.
 
@@ -209,8 +214,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests\run-selftest.ps1
   Win32 input-mode records, ConPTY spawn + echo + exit, process current
   directory, live PowerShell Ctrl+Backspace editing, emoji input, the
   replacement-glyph cleanup, PowerShell OSC 7 integration (including `cd`),
-  and symbol/CJK font fallback coverage. Results are JSON-ish lines; expect
-  `summary passed=105 failed=0`.
+  scrollback search and absolute buffer coordinates, and symbol/CJK font
+  fallback coverage. Results are JSON-ish lines; expect
+  `summary passed=115 failed=0`.
 - `--bench [lines]`: parser/screen microbenchmarks on synthetic colored output.
 - `--bench-startup`: hidden chrome construction timing and RSS.
 - Manual smoke: PowerShell and cmd tabs, `dir`, `git status`, colors, Unicode,

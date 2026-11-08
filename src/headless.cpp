@@ -590,6 +590,36 @@ void TestWin32Input(Harness& h) {
     session.close();
 }
 
+void TestSearch(Harness& h) {
+    vt::Terminal terminal(20, 5, 100);
+    terminal.feed("alpha\r\nBeta alpha\r\ngamma ALPHA\r\n");
+    const auto matches = terminal.findText(L"alpha");
+    h.check(matches.size() == 3, L"search: case-insensitive count",
+            std::to_wstring(matches.size()));
+    if (matches.size() == 3) {
+        h.check(matches[0].line == 0 && matches[0].first == 0 && matches[0].last == 4,
+                L"search: first match");
+        h.check(matches[1].line == 1 && matches[1].first == 5 && matches[1].last == 9,
+                L"search: second match");
+        h.check(matches[2].line == 2 && matches[2].first == 6 && matches[2].last == 10,
+                L"search: third match");
+    }
+    h.check(terminal.findText(L"ALPHA", true).size() == 1, L"search: case-sensitive");
+    h.check(terminal.findText(L"").empty(), L"search: empty query");
+
+    // Absolute buffer coordinates: scrolling must not move what a row means.
+    vt::Terminal scrolled(10, 3, 100);
+    scrolled.feed("l0\r\nl1\r\nl2\r\nl3\r\nl4\r\n");
+    const int sb = scrolled.scrollbackSize();
+    h.check(sb >= 2, L"scroll: scrollback grew");
+    scrolled.setScrollOffset(1);
+    h.check(scrolled.bufferRow(0) == sb - 1, L"scroll: buffer base follows offset");
+    h.check(scrolled.bufferLine(scrolled.bufferRow(0)) == scrolled.viewLine(0),
+            L"scroll: absolute and viewport rows agree");
+    const auto old = scrolled.findText(L"l0");
+    h.check(!old.empty() && old.front().line < sb, L"search: scrollback line found");
+}
+
 void TestShellIntegration(Harness& h) {
     const std::wstring command = shellint::Prepare(L"powershell.exe -NoLogo");
     h.check(command.find(L"-Command") != std::wstring::npos,
@@ -686,6 +716,7 @@ int RunSelfTest(const std::wstring& logPath) {
     TestInput(harness);
     TestPty(harness);
     TestWin32Input(harness);
+    TestSearch(harness);
     TestShellIntegration(harness);
     TestStartupComponents(harness);
 

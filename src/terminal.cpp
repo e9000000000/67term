@@ -573,6 +573,58 @@ void Terminal::clearScrollback() {
     scrollOffset_ = 0;
 }
 
+std::vector<Terminal::SearchMatch> Terminal::findText(const std::wstring& query,
+                                                     bool matchCase) const {
+    std::vector<SearchMatch> matches;
+    if (query.empty()) {
+        return matches;
+    }
+    std::wstring needle;
+    needle.reserve(query.size());
+    for (const wchar_t ch : query) {
+        needle.push_back(matchCase ? ch : static_cast<wchar_t>(std::towlower(ch)));
+    }
+
+    const int sb = static_cast<int>(scrollback_.size());
+    const int total = altActive_ ? rows_ : sb + rows_;
+    for (int lineIndex = 0; lineIndex < total; ++lineIndex) {
+        const Line* line = altActive_ ? &grid()[static_cast<size_t>(lineIndex)]
+                                      : combinedLinePtr(lineIndex);
+        if (!line) {
+            continue;
+        }
+        std::wstring text;
+        std::vector<int> columns;
+        text.reserve(line->cells.size());
+        columns.reserve(line->cells.size());
+        for (size_t x = 0; x < line->cells.size(); ++x) {
+            const Cell& cell = line->cells[x];
+            if (cell.width == 0) {
+                continue;
+            }
+            if (cell.text[0] == 0) {
+                text.push_back(L' ');
+                columns.push_back(static_cast<int>(x));
+                continue;
+            }
+            for (const wchar_t* p = cell.text; *p; ++p) {
+                text.push_back(matchCase ? *p : static_cast<wchar_t>(std::towlower(*p)));
+                columns.push_back(static_cast<int>(x));
+            }
+        }
+        if (needle.size() > text.size()) {
+            continue;
+        }
+        for (size_t pos = 0; pos + needle.size() <= text.size(); ++pos) {
+            if (text.compare(pos, needle.size(), needle) == 0) {
+                matches.push_back({lineIndex, columns[pos], columns[pos + needle.size() - 1]});
+                pos += needle.size() - 1;
+            }
+        }
+    }
+    return matches;
+}
+
 // ---------------------------------------------------------------- buffer ops
 
 Cell Terminal::blankCell() const {

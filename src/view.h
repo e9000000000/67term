@@ -86,6 +86,9 @@ public:
 
     void setSearchState(bool active) { searchActive_ = active; }
     void setScrollbackLimit(int lines);
+    void openSearch();
+    void closeSearch();
+    void findNext(int direction);
 
     std::function<void()> onTitleChanged;
     std::function<void()> onStateChanged;
@@ -106,6 +109,11 @@ private:
     void armAstralBackspace();
     void checkAstralBackspace();
     void sendExtraBackspace();
+    void updateSearch(bool jump);
+    void scrollToSearchMatch();
+    void positionSearchEdit();
+    static LRESULT CALLBACK SearchEditProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam,
+                                           UINT_PTR subclassId, DWORD_PTR refData);
     void paint(HDC target);
     void paintGrid(HDC dc, const RECT& client);
     void paintCursor(HDC dc);
@@ -210,6 +218,11 @@ private:
     wchar_t pendingHighSurrogate_ = 0;
     bool suppressNextChar_ = false;
     bool searchActive_ = false;
+    HWND searchEdit_ = nullptr;
+    HBRUSH searchBrush_ = nullptr;
+    std::wstring searchQuery_;
+    std::vector<vt::Terminal::SearchMatch> searchMatches_;
+    int searchCurrent_ = -1;
 
     // Some shells (Windows PowerShell 5.1) delete one UTF-16 code unit per
     // Backspace, leaving a lone surrogate as U+FFFD after an astral character.

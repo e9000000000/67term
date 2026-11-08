@@ -198,6 +198,9 @@ wide cell.
 Scrolling the full main screen pushes the top line to scrollback; scrolling a
 smaller DECSTBM region does not. Scrollback is trimmed from the front; if the
 user is scrolled up when lines are trimmed, the viewport offset is adjusted.
+`bufferRow`/`bufferLine` expose absolute buffer coordinates (row 0 is the
+oldest scrollback line), which selection and search use. `findText` flattens
+each line to text while mapping string offsets back to cell columns.
 
 ## Renderer
 
@@ -226,6 +229,12 @@ user is scrolled up when lines are trimmed, the viewport offset is adjusted.
   scrolled to the bottom.
 - Selection: click-drag, double-click word, triple-click line; highlight and
   copy with trailing spaces trimmed. Ctrl+Shift+C / Ctrl+Shift+V, plus the menu.
+  Selection endpoints are absolute buffer rows (scrollback included), so
+  scrolling does not drag the highlight along with the viewport.
+- Search: `Ctrl+Shift+F` shows a child `EDIT` find bar over the terminal. The
+  terminal returns every match in absolute buffer coordinates; the renderer
+  highlights all visible matches (current match brighter). Enter/Shift+Enter or
+  F3/Shift+F3 moves between matches and scrolls them into view; Esc closes.
 - Scrollback: mouse wheel, Shift+wheel, Shift+PageUp/PageDown; an overlay
   scrollbar on the right; any keystroke returns to the bottom.
 - Mouse reporting: when the app enables 1000/1002/1003, mouse events are encoded

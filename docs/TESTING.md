@@ -10,7 +10,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests\run-startup.ps1
 ```
 
 The self-test creates no visible window. It writes `build\selftest.log` and exits
-non-zero on a failure. Current check count: **105** (`summary passed=105 failed=0`).
+non-zero on a failure. Current check count: **115** (`summary passed=115 failed=0`).
 
 Coverage:
 
@@ -28,6 +28,7 @@ Coverage:
 - real ConPTY: spawn, output, `TERM` environment, resize, child exit
 - process current directory read from a live shell's PEB
 - PowerShell OSC 7 integration: initial directory and following `cd`
+- scrollback search (case-insensitive and case-sensitive) and absolute buffer rows
 - live PowerShell: Win32 input mode, Ctrl+Backspace, emoji input and the
   replacement-glyph follow-up Backspace
 - hidden chrome construction timing
@@ -47,7 +48,7 @@ Reference numbers (this machine, release build):
 
 | Metric | Value |
 |---|---|
-| EXE | 553,984 bytes |
+| EXE | 566,784 bytes |
 | 10,000 lines parse + store | 18.5 ms |
 | Resize cycle (100x30 → 140x45 → 120x40) | 5.9 ms |
 | RSS with 10k scrollback lines | ~50 MB |
@@ -60,6 +61,10 @@ Reference numbers (this machine, release build):
   run `git status` for color.
 - Run a long command (`dir -Recurse C:\Windows`) and wheel/Shift+PageUp.
 - Select text, `Ctrl+Shift+C`, paste into another app, `Ctrl+Shift+V` back.
+- Select text, then wheel/Shift+PageUp: the highlight must stay on the same
+  lines, not move with the viewport.
+- `Ctrl+Shift+F`, type a word that exists in scrollback: all matches highlight,
+  Enter/Shift+Enter jump between them, Esc returns focus to the shell.
 - `Ctrl+Shift+T` twice, switch with `Ctrl+Tab`, drag tabs, middle-click/close.
 - Type `exit`: tab shows `(exited)`; `Ctrl+Shift+R` restarts the shell.
 - Resize the window and run `mode con` / `$Host.UI.RawUI.WindowSize`; check the

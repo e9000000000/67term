@@ -517,6 +517,7 @@ void App::showBurgerMenu(int section) {
         add(kCmdPaste, L"Paste", L"Ctrl+Shift+V", state.running);
         add(kCmdSelectAll, L"Select All", L"Ctrl+Shift+A", has);
         add(kCmdClearSelection, L"Clear Selection", L"", state.hasSelection);
+        add(kCmdFind, L"Find...", L"Ctrl+Shift+F", has);
         separator();
         add(kCmdScrollTop, L"Scroll to Top", L"Ctrl+Shift+Home", has);
         add(kCmdScrollBottom, L"Scroll to Bottom", L"Ctrl+Shift+End", has);
@@ -607,6 +608,11 @@ void App::onCommand(UINT id) {
     case kCmdClearSelection:
         if (tab) {
             tab->view->clearSelection();
+        }
+        break;
+    case kCmdFind:
+        if (tab) {
+            tab->view->openSearch();
         }
         break;
     case kCmdClearScrollback:
@@ -868,6 +874,7 @@ void App::showViewContextMenu(HWND view, POINT screenPoint) {
     items.push_back(MakeMenuItem(kCmdSelectAll, L"Select All", L"Ctrl+Shift+A", true));
     items.push_back(MakeMenuItem(kCmdClearSelection, L"Clear Selection", L"",
                                  target->view->hasSelection()));
+    items.push_back(MakeMenuItem(kCmdFind, L"Find...", L"Ctrl+Shift+F", true));
     items.push_back(MakeSeparator());
     items.push_back(MakeMenuItem(kCmdClearScrollback, L"Clear Scrollback", L"Ctrl+Shift+K",
                                  true));

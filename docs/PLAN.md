@@ -34,13 +34,14 @@
   (`ITerminalHandoff3` COM handoff, with delegated consoles opening as tabs),
   single-instance tab forwarding, new tabs inheriting the current directory
   (PowerShell OSC 7 integration, cmd PEB, or OSC 7), and emoji/VS16 width
-  handling are done. A renderer bug
+  handling are done, along with scrollback search (`Ctrl+Shift+F`) and
+  buffer-anchored selections. A renderer bug
   that shifted text after blank cells left is fixed. Remaining: scrollback
   search, OSC 8 hyperlinks, shell-integration marks, and optional
   focus/attention polish.
 - **M3 not started.**
 
-Latest measured release build: 553,984 bytes; 10,000 colored lines parsed and
+Latest measured release build: 566,784 bytes; 10,000 colored lines parsed and
 stored in 18.5 ms; resize cycle 5.9 ms; ~50 MB RSS with 10k scrollback lines.
 
 ## Target numbers

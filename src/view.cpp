@@ -1,4 +1,5 @@
 #include <windows.h>
+#include <commctrl.h>
 #include <imm.h>
 #include <windowsx.h>
 
@@ -19,6 +20,8 @@ namespace {
 constexpr wchar_t kViewClass[] = L"67tTerminalView";
 constexpr UINT_PTR kBlinkTimer = 1;
 constexpr UINT kBlinkIntervalMs = 530;
+constexpr int kSearchEditId = 1;
+constexpr UINT_PTR kSearchSubclassId = 1;
 
 void Fill(HDC dc, const RECT& rect, COLORREF color) {
     HBRUSH brush = CreateSolidBrush(color);
@@ -180,6 +183,10 @@ TerminalView::~TerminalView() {
             font = nullptr;
         }
     }
+    if (searchBrush_) {
+        DeleteObject(searchBrush_);
+        searchBrush_ = nullptr;
+    }
 }
 
 bool TerminalView::create(HWND parent, HINSTANCE instance) {
@@ -206,6 +213,20 @@ bool TerminalView::create(HWND parent, HINSTANCE instance) {
     dpi_ = theme::DpiOf(hwnd_ ? hwnd_ : parent);
     ensureFonts();
     measure();
+
+    searchBrush_ = CreateSolidBrush(theme::kSearchBg);
+    searchEdit_ = CreateWindowExW(0, L"EDIT", L"",
+                                  WS_CHILD | ES_AUTOHSCROLL | ES_LEFT, 0, 0, 0, 0, hwnd_,
+                                  reinterpret_cast<HMENU>(static_cast<INT_PTR>(kSearchEditId)),
+                                  instance, nullptr);
+    if (searchEdit_) {
+        SendMessageW(searchEdit_, WM_SETFONT, reinterpret_cast<WPARAM>(regularFont_), TRUE);
+        SendMessageW(searchEdit_, EM_SETLIMITTEXT, 256, 0);
+        SendMessageW(searchEdit_, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN,
+                     MAKELPARAM(theme::Scale(6, dpi_), theme::Scale(6, dpi_)));
+        SetWindowSubclass(searchEdit_, SearchEditProc, kSearchSubclassId,
+                          reinterpret_cast<DWORD_PTR>(this));
+    }
     SetTimer(hwnd_, kBlinkTimer, kBlinkIntervalMs, nullptr);
     return true;
 }
@@ -331,6 +352,11 @@ void TerminalView::ensureFonts() {
 
     padding_ = std::max(4, theme::Scale(7, dpi_));
     scrollbarWidth_ = std::max(3, theme::Scale(5, dpi_));
+    if (searchEdit_) {
+        SendMessageW(searchEdit_, WM_SETFONT, reinterpret_cast<WPARAM>(regularFont_), TRUE);
+        SendMessageW(searchEdit_, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN,
+                     MAKELPARAM(padding_, padding_));
+    }
 }
 
 bool TerminalView::hasRenderableGlyph(uint32_t codePoint) const {
@@ -395,6 +421,136 @@ void TerminalView::measure() {
     columns_ = std::max(2, usableWidth / std::max(1, cellWidth_));
     rows_ = std::max(1, usableHeight / std::max(1, cellHeight_));
     terminal_.setPixelSize(columns_ * cellWidth_, rows_ * cellHeight_);
+    positionSearchEdit();
+}
+
+void TerminalView::positionSearchEdit() {
+    if (!searchActive_ || !searchEdit_ || !hwnd_) {
+        return;
+    }
+    RECT client{};
+    GetClientRect(hwnd_, &client);
+    const int maxWidth = std::max(120, static_cast<int>(client.right) - padding_ * 2);
+    const int width = std::min(theme::Scale(360, dpi_), maxWidth);
+    const int height = theme::Scale(26, dpi_);
+    SetWindowPos(searchEdit_, HWND_TOP, client.right - padding_ - width, padding_, width, height,
+                 SWP_NOACTIVATE);
+}
+
+void TerminalView::openSearch() {
+    if (!searchEdit_) {
+        return;
+    }
+    searchActive_ = true;
+    positionSearchEdit();
+    ShowWindow(searchEdit_, SW_SHOW);
+    SetFocus(searchEdit_);
+    SendMessageW(searchEdit_, EM_SETSEL, 0, -1);
+    updateSearch(true);
+    invalidate();
+}
+
+void TerminalView::closeSearch() {
+    if (!searchActive_) {
+        return;
+    }
+    searchActive_ = false;
+    if (searchEdit_) {
+        ShowWindow(searchEdit_, SW_HIDE);
+    }
+    searchQuery_.clear();
+    searchMatches_.clear();
+    searchCurrent_ = -1;
+    SetFocus(hwnd_);
+    invalidate();
+}
+
+void TerminalView::updateSearch(bool jump) {
+    if (!searchEdit_) {
+        return;
+    }
+    wchar_t buffer[256]{};
+    GetWindowTextW(searchEdit_, buffer, 256);
+    searchQuery_ = buffer;
+    searchMatches_ = terminal_.findText(searchQuery_);
+    searchCurrent_ = -1;
+    if (jump && !searchMatches_.empty()) {
+        const int base = terminal_.bufferBase();
+        searchCurrent_ = 0;
+        for (size_t i = 0; i < searchMatches_.size(); ++i) {
+            if (searchMatches_[i].line >= base) {
+                searchCurrent_ = static_cast<int>(i);
+                break;
+            }
+        }
+        scrollToSearchMatch();
+    }
+    invalidate();
+}
+
+void TerminalView::scrollToSearchMatch() {
+    if (searchCurrent_ < 0 || searchCurrent_ >= static_cast<int>(searchMatches_.size())) {
+        return;
+    }
+    if (terminal_.altScreen()) {
+        terminal_.setScrollOffset(0);
+        return;
+    }
+    const vt::Terminal::SearchMatch& match = searchMatches_[static_cast<size_t>(searchCurrent_)];
+    const int viewport = match.line - terminal_.bufferBase();
+    if (viewport < 0 || viewport >= rows_) {
+        const int offset = terminal_.scrollbackSize() - match.line + rows_ / 2;
+        terminal_.setScrollOffset(offset);
+    }
+    invalidate();
+}
+
+void TerminalView::findNext(int direction) {
+    if (!searchActive_ || searchMatches_.empty()) {
+        return;
+    }
+    const int count = static_cast<int>(searchMatches_.size());
+    if (searchCurrent_ < 0) {
+        searchCurrent_ = 0;
+    } else {
+        const int step = direction >= 0 ? 1 : -1;
+        searchCurrent_ = (searchCurrent_ + step + count) % count;
+    }
+    scrollToSearchMatch();
+    invalidate();
+}
+
+LRESULT CALLBACK TerminalView::SearchEditProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam,
+                                              UINT_PTR subclassId, DWORD_PTR refData) {
+    auto* self = reinterpret_cast<TerminalView*>(refData);
+    switch (message) {
+    case WM_KEYDOWN: {
+        const bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+        if (wParam == VK_RETURN) {
+            self->findNext(shift ? -1 : 1);
+            return 0;
+        }
+        if (wParam == VK_F3) {
+            self->findNext(shift ? -1 : 1);
+            return 0;
+        }
+        if (wParam == VK_ESCAPE) {
+            self->closeSearch();
+            return 0;
+        }
+        if (wParam == 'F' && shift && (GetKeyState(VK_CONTROL) & 0x8000) != 0) {
+            self->closeSearch();
+            return 0;
+        }
+        break;
+    }
+    case WM_NCDESTROY:
+        RemoveWindowSubclass(hwnd, SearchEditProc, subclassId);
+        break;
+    default:
+        break;
+    }
+    return DefSubclassProc(hwnd, message, wParam, lParam);
 }
 
 void TerminalView::applySize() {
@@ -658,16 +814,19 @@ bool TerminalView::cellSelected(int x, int y) const {
     if (!haveSelection_) {
         return false;
     }
-    if (y < selectionStartY_ || y > selectionEndY_) {
+    // Selection rows are absolute buffer rows, so scrolling keeps the
+    // highlight anchored to the text instead of the viewport.
+    const int row = terminal_.bufferRow(y);
+    if (row < selectionStartY_ || row > selectionEndY_) {
         return false;
     }
     if (selectionStartY_ == selectionEndY_) {
-        return y == selectionStartY_ && x >= selectionStartX_ && x <= selectionEndX_;
+        return row == selectionStartY_ && x >= selectionStartX_ && x <= selectionEndX_;
     }
-    if (y == selectionStartY_) {
+    if (row == selectionStartY_) {
         return x >= selectionStartX_;
     }
-    if (y == selectionEndY_) {
+    if (row == selectionEndY_) {
         return x <= selectionEndX_;
     }
     return true;
@@ -713,20 +872,57 @@ void TerminalView::paintGrid(HDC dc, const RECT&) {
     for (int row = 0; row < rows_; ++row) {
         const vt::Line* line = terminal_.viewLine(row);
         const int rowTop = top + row * cellHeight_;
+        const int absoluteRow = terminal_.bufferRow(row);
+
+        struct SearchSpan {
+            int first = 0;
+            int last = 0;
+            bool current = false;
+        };
+        std::vector<SearchSpan> searchSpans;
+        if (searchActive_ && !searchMatches_.empty()) {
+            for (size_t i = 0; i < searchMatches_.size(); ++i) {
+                const vt::Terminal::SearchMatch& match = searchMatches_[i];
+                if (match.line == absoluteRow) {
+                    searchSpans.push_back(
+                        {match.first, match.last, static_cast<int>(i) == searchCurrent_});
+                }
+            }
+        }
+        const auto searchAt = [&searchSpans](int x) {
+            for (const SearchSpan& span : searchSpans) {
+                if (x >= span.first && x <= span.last) {
+                    return span.current ? 2 : 1;
+                }
+            }
+            return 0;
+        };
+        const auto backgroundAt = [&](int x, int y, const vt::Cell& cell) {
+            if (cellSelected(x, y)) {
+                return theme::kTermSelection;
+            }
+            const int search = searchAt(x);
+            if (search == 2) {
+                return theme::kTermSearchCurrent;
+            }
+            if (search == 1) {
+                return theme::kTermSearch;
+            }
+            return cellBackground(cell);
+        };
 
         // Backgrounds, batched by color.
         int x = 0;
         while (x < columns_) {
             const vt::Cell& cell =
                 (line && x < static_cast<int>(line->cells.size())) ? line->cells[x] : vt::Cell{};
-            COLORREF color = cellSelected(x, row) ? theme::kTermSelection : cellBackground(cell);
+            COLORREF color = backgroundAt(x, row, cell);
             int end = x + 1;
             while (end < columns_) {
                 const vt::Cell& next =
                     (line && end < static_cast<int>(line->cells.size())) ? line->cells[end]
                                                                          : vt::Cell{};
-                COLORREF nextColor =
-                    cellSelected(end, row) ? theme::kTermSelection : cellBackground(next);
+                COLORREF nextColor = backgroundAt(end, row, next);
                 if (nextColor != color) {
                     break;
                 }
@@ -946,6 +1142,7 @@ void TerminalView::focusCellFromPoint(int px, int py, int& x, int& y) const {
 }
 
 void TerminalView::beginSelection(int x, int y) {
+    y = terminal_.bufferRow(y);
     selectionAnchorX_ = x;
     selectionAnchorY_ = y;
     selectionStartX_ = x;
@@ -960,6 +1157,7 @@ void TerminalView::updateSelection(int x, int y) {
     if (!selecting_) {
         return;
     }
+    y = terminal_.bufferRow(y);
     const bool same = x == selectionAnchorX_ && y == selectionAnchorY_;
     if (same && !haveSelection_) {
         return;
@@ -988,7 +1186,8 @@ void TerminalView::endSelection() {
 }
 
 void TerminalView::selectWordAt(int x, int y) {
-    const vt::Line* line = terminal_.viewLine(y);
+    y = terminal_.bufferRow(y);
+    const vt::Line* line = terminal_.bufferLine(y);
     if (!line) {
         return;
     }
@@ -1021,6 +1220,7 @@ void TerminalView::selectWordAt(int x, int y) {
 
 void TerminalView::selectLineAt(int x, int y) {
     (void)x;
+    y = terminal_.bufferRow(y);
     selectionStartX_ = 0;
     selectionStartY_ = y;
     selectionEndX_ = columns_ - 1;
@@ -1041,7 +1241,7 @@ std::wstring TerminalView::selectedText() const {
     }
     std::wstring result;
     for (int y = selectionStartY_; y <= selectionEndY_; ++y) {
-        const vt::Line* line = terminal_.viewLine(y);
+        const vt::Line* line = terminal_.bufferLine(y);
         if (!line) {
             continue;
         }
@@ -1105,7 +1305,9 @@ void TerminalView::selectAll() {
     selectionStartX_ = 0;
     selectionStartY_ = 0;
     selectionEndX_ = columns_ - 1;
-    selectionEndY_ = rows_ - 1;
+    selectionEndY_ = terminal_.altScreen()
+                         ? rows_ - 1
+                         : terminal_.scrollbackSize() + rows_ - 1;
     haveSelection_ = true;
     notifyParent(kViewStateChanged);
     invalidate();
@@ -1374,6 +1576,17 @@ LRESULT TerminalView::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) 
             session_.write("\x1b[O");
         }
         invalidate();
+        return 0;
+    case WM_CTLCOLOREDIT: {
+        HDC dc = reinterpret_cast<HDC>(wParam);
+        SetTextColor(dc, theme::kTermFg);
+        SetBkColor(dc, theme::kSearchBg);
+        return reinterpret_cast<LRESULT>(searchBrush_);
+    }
+    case WM_COMMAND:
+        if (LOWORD(wParam) == kSearchEditId && HIWORD(wParam) == EN_CHANGE) {
+            updateSearch(true);
+        }
         return 0;
     case WM_TIMER:
         if (wParam == kBlinkTimer) {

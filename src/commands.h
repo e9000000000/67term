@@ -14,6 +14,7 @@ enum : unsigned int {
     kCmdPaste,
     kCmdSelectAll,
     kCmdClearSelection,
+    kCmdFind,
     kCmdClearScrollback,
     kCmdScrollTop,
     kCmdScrollBottom,

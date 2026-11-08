@@ -13,6 +13,8 @@ ConPTY shell. Same visual language as [67ed](../67ed).
 - Launching 67t again opens a tab in the running window (`--new-window` for a
   separate window)
 - 10,000-line scrollback (configurable), wheel and keyboard scrolling
+- Scrollback search with highlighting (`Ctrl+Shift+F`); selections stay on
+  their text while scrolling
 - 16/256/24-bit color, bold/italic/underline/strike, cursor styles
 - Selection, copy/paste, bracketed paste, mouse reporting, IME input
 - UTF-8, wide characters and emoji (astral cells, VS16), alternate screen,
@@ -67,6 +69,7 @@ Terminal** and **Restore Previous Default Terminal**.
 | Restart shell | `Ctrl+Shift+R` |
 | Copy / paste | `Ctrl+Shift+C` / `Ctrl+Shift+V` |
 | Select all | `Ctrl+Shift+A` |
+| Find in scrollback | `Ctrl+Shift+F` |
 | Clear scrollback | `Ctrl+Shift+K` |
 | Next / previous tab | `Ctrl+Tab` / `Ctrl+Shift+Tab` |
 | Go to tab 1–9 | `Ctrl+1` … `Ctrl+9` |
@@ -124,7 +127,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests\run-selftest.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File tests\run-bench.ps1
 ```
 
-Measured on this machine: 541 KiB EXE, 18.5 ms to parse and store 10,000 colored
+Measured on this machine: 554 KiB EXE, 18.5 ms to parse and store 10,000 colored
 lines (120x40, 10k scrollback), 5.9 ms for a resize cycle, about 50 MB RSS with
 10k scrollback lines.
 
