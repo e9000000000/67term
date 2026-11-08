@@ -128,6 +128,13 @@ std::string EncodeMouse(int button, int x, int y, bool release, bool motion, boo
     return out;
 }
 
+std::string EncodeWin32Key(int vk, int scanCode, int unicode, bool keyDown, int controlState,
+                           int repeat) {
+    return "\x1b[" + std::to_string(vk) + ";" + std::to_string(scanCode) + ";" +
+           std::to_string(unicode) + ";" + (keyDown ? "1" : "0") + ";" +
+           std::to_string(controlState) + ";" + std::to_string(std::max(1, repeat)) + "_";
+}
+
 std::wstring NormalizePaste(std::wstring_view text) {
     std::wstring out;
     out.reserve(text.size());

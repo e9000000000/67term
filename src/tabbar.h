@@ -16,9 +16,7 @@ constexpr UINT kClose = WM_APP + 0x102;
 constexpr UINT kNew = WM_APP + 0x103;
 constexpr UINT kReorder = WM_APP + 0x104;
 constexpr UINT kContext = WM_APP + 0x105;
-constexpr UINT kMinimize = WM_APP + 0x106;
-constexpr UINT kMaximize = WM_APP + 0x107;
-constexpr UINT kCloseWindow = WM_APP + 0x108;
+constexpr UINT kMenu = WM_APP + 0x106;
 }  // namespace tabbar_events
 
 class TabBar {
@@ -55,6 +53,7 @@ private:
     int active_ = -1;
     int hover_ = -1;
     bool closeHover_ = false;
+    bool menuHover_ = false;
     int scrollX_ = 0;
 
     bool dragging_ = false;
@@ -65,9 +64,6 @@ private:
 
     std::vector<RECT> tabRects_;
     std::vector<RECT> closeRects_;
+    RECT menuRect_{};
     RECT plusRect_{};
-    RECT minimizeRect_{};
-    RECT maximizeRect_{};
-    RECT closeWindowRect_{};
-    int hoverControl_ = -1;
 };

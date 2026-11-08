@@ -24,16 +24,17 @@
   parser, screen buffer with scrollback and wide cells, GDI renderer, keyboard,
   mouse, IME, and headless tests.
 - **M1 complete (2026-11-08).** Tabs (new/close/reorder/context menu, OSC
-  titles), Ctrl+Shift shortcuts, tab cycling, font zoom, fullscreen, settings
-  and window-placement persistence, drag-and-drop, and shell exit/restart.
+  titles), Ctrl+Shift shortcuts, tab cycling, font zoom, fullscreen, font
+  chooser, burger menu, settings and window-placement persistence, drag-and-drop,
+  and shell exit/restart.
 - **M2 in progress.** OSC 7 directories, OSC 52 clipboard writes, SGR mouse,
-  word/line selection, scrollback bar, and Shift+PageUp/PageDown are done.
-  Remaining: scrollback search, OSC 8 hyperlinks, shell-integration marks, and
-  optional focus/attention polish.
+  Win32 input mode (Ctrl+Backspace/Ctrl+Delete), word/line selection, scrollback
+  bar, and Shift+PageUp/PageDown are done. Remaining: scrollback search, OSC 8
+  hyperlinks, shell-integration marks, and optional focus/attention polish.
 - **M3 not started.**
 
-Latest measured release build: 460,800 bytes; 10,000 colored lines parsed and
-stored in 24.2 ms; resize cycle 5.3 ms; ~50 MB RSS with 10k scrollback lines.
+Latest measured release build: 470,528 bytes; 10,000 colored lines parsed and
+stored in 18.5 ms; resize cycle 5.9 ms; ~50 MB RSS with 10k scrollback lines.
 
 ## Target numbers
 
@@ -52,7 +53,8 @@ stored in 24.2 ms; resize cycle 5.3 ms; ~50 MB RSS with 10k scrollback lines.
 ### M0 — Native skeleton and real shell
 
 - Build script, repo, resources, CI.
-- Custom dark window chrome: title/tab row, menu bar, status bar.
+- Custom dark window chrome: title/tab row with burger menu and fixed plus; no
+  separate menu bar or status bar.
 - ConPTY session: spawn shell, reader thread, input writes, resize, clean close.
 - VT parser: UTF-8, C0, ESC, CSI, OSC, private modes, SGR, erase/insert/delete,
   scroll regions, alt screen, tab stops, DA/DSR responses.

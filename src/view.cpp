@@ -293,6 +293,8 @@ bool TerminalView::start(const std::wstring& commandLine, const std::wstring& wo
     haveSelection_ = false;
     selecting_ = false;
     pendingHighSurrogate_ = 0;
+    pendingWin32Key_.active = false;
+    std::memset(win32KeySent_, 0, sizeof(win32KeySent_));
     terminal_.setScrollbackLimit(scrollbackLimit_);
     terminal_.reset(true);
     terminal_.resize(columns_, rows_);
@@ -961,6 +963,88 @@ void TerminalView::sendKey(WPARAM key, bool ctrl, bool alt, bool shift, bool) {
     }
 }
 
+int TerminalView::win32ControlState(WPARAM, bool extended) const {
+    int state = 0;
+    if (GetKeyState(VK_SHIFT) & 0x8000) {
+        state |= 0x0010;  // SHIFT_PRESSED
+    }
+    if (GetKeyState(VK_CONTROL) & 0x8000) {
+        state |= (GetKeyState(VK_RCONTROL) & 0x8000) ? 0x0004 : 0x0008;
+    }
+    if (GetKeyState(VK_MENU) & 0x8000) {
+        state |= (GetKeyState(VK_RMENU) & 0x8000) ? 0x0001 : 0x0002;
+    }
+    if (GetKeyState(VK_NUMLOCK) & 1) {
+        state |= 0x0020;
+    }
+    if (GetKeyState(VK_SCROLL) & 1) {
+        state |= 0x0040;
+    }
+    if (GetKeyState(VK_CAPITAL) & 1) {
+        state |= 0x0080;
+    }
+    if (extended) {
+        state |= 0x0100;
+    }
+    return state;
+}
+
+bool TerminalView::keyProducesCharacter(WPARAM vk) const {
+    switch (vk) {
+    case VK_SHIFT:
+    case VK_CONTROL:
+    case VK_MENU:
+    case VK_LWIN:
+    case VK_RWIN:
+    case VK_CAPITAL:
+    case VK_NUMLOCK:
+    case VK_SCROLL:
+    case VK_PAUSE:
+    case VK_SNAPSHOT:
+    case VK_APPS:
+    case VK_SLEEP:
+    case VK_ESCAPE:
+    case VK_UP:
+    case VK_DOWN:
+    case VK_LEFT:
+    case VK_RIGHT:
+    case VK_HOME:
+    case VK_END:
+    case VK_INSERT:
+    case VK_DELETE:
+    case VK_PRIOR:
+    case VK_NEXT:
+        return false;
+    default:
+        break;
+    }
+    if (vk >= VK_F1 && vk <= VK_F24) {
+        return false;
+    }
+    return true;
+}
+
+void TerminalView::sendWin32KeyRecord(WPARAM vk, LPARAM lParam, bool keyDown, int unicode,
+                                      int repeat) {
+    const bool extended = (lParam & 0x01000000) != 0;
+    const int scan = static_cast<int>(MapVirtualKeyW(static_cast<UINT>(vk), MAPVK_VK_TO_VSC));
+    const int control = win32ControlState(vk, extended);
+    const int count = std::max(1, repeat);
+    sendText(input::EncodeWin32Key(static_cast<int>(vk), scan, unicode, keyDown, control, count));
+    if (keyDown) {
+        win32KeySent_[vk & 0xFF] = true;
+    }
+}
+
+void TerminalView::flushPendingWin32Key() {
+    if (!pendingWin32Key_.active) {
+        return;
+    }
+    sendWin32KeyRecord(pendingWin32Key_.vk, pendingWin32Key_.lParam, true, 0,
+                       pendingWin32Key_.repeat);
+    pendingWin32Key_.active = false;
+}
+
 std::string TerminalView::encodeMouse(int button, int x, int y, bool release, bool motion) const {
     const bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
     const bool alt = (GetKeyState(VK_MENU) & 0x8000) != 0;
@@ -1078,6 +1162,55 @@ LRESULT TerminalView::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) 
         const bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
         const bool alt = (GetKeyState(VK_MENU) & 0x8000) != 0;
         const bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+        if (shift && !ctrl && !alt) {
+            if (wParam == VK_PRIOR) {
+                scrollWithDelta(std::max(1, rows_ - 1));
+                return 0;
+            }
+            if (wParam == VK_NEXT) {
+                scrollWithDelta(-std::max(1, rows_ - 1));
+                return 0;
+            }
+        }
+        if (wParam == VK_INSERT && shift) {
+            pasteClipboard();
+            return 0;
+        }
+        if (terminal_.win32InputMode()) {
+            switch (wParam) {
+            case VK_SHIFT:
+            case VK_CONTROL:
+            case VK_MENU:
+            case VK_LWIN:
+            case VK_RWIN:
+            case VK_CAPITAL:
+            case VK_NUMLOCK:
+            case VK_SCROLL:
+                return 0;
+            default:
+                break;
+            }
+            if (pendingWin32Key_.active) {
+                flushPendingWin32Key();
+            }
+            const int repeat = std::max(1, static_cast<int>(LOWORD(lParam)));
+            if (wParam == VK_ESCAPE) {
+                sendWin32KeyRecord(wParam, lParam, true, 27, repeat);
+                return 0;
+            }
+            if (!keyProducesCharacter(wParam)) {
+                sendWin32KeyRecord(wParam, lParam, true, 0, repeat);
+                return 0;
+            }
+            pendingWin32Key_.active = true;
+            pendingWin32Key_.vk = wParam;
+            pendingWin32Key_.lParam = lParam;
+            pendingWin32Key_.extended = (lParam & 0x01000000) != 0;
+            pendingWin32Key_.repeat = repeat;
+            return 0;
+        }
+        pendingWin32Key_.active = false;
+        std::memset(win32KeySent_, 0, sizeof(win32KeySent_));
         switch (wParam) {
         case VK_SHIFT:
         case VK_CONTROL:
@@ -1107,21 +1240,6 @@ LRESULT TerminalView::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) 
             break;
         default:
             break;
-        }
-        if (shift && !ctrl && !alt) {
-            if (wParam == VK_PRIOR) {
-                scrollWithDelta(std::max(1, rows_ - 1));
-                return 0;
-            }
-            if (wParam == VK_NEXT) {
-                scrollWithDelta(-std::max(1, rows_ - 1));
-                return 0;
-            }
-        }
-        if (wParam == VK_INSERT && shift) {
-            pasteClipboard();
-            suppressNextChar_ = true;
-            return 0;
         }
         switch (wParam) {
         case VK_UP:
@@ -1160,7 +1278,64 @@ LRESULT TerminalView::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) 
         }
         return 0;
     }
+    case WM_KEYUP:
+    case WM_SYSKEYUP: {
+        if (message == WM_SYSKEYUP && wParam == VK_F4) {
+            break;
+        }
+        if (!terminal_.win32InputMode()) {
+            pendingWin32Key_.active = false;
+            return 0;
+        }
+        switch (wParam) {
+        case VK_SHIFT:
+        case VK_CONTROL:
+        case VK_MENU:
+        case VK_LWIN:
+        case VK_RWIN:
+        case VK_CAPITAL:
+        case VK_NUMLOCK:
+        case VK_SCROLL:
+            return 0;
+        default:
+            break;
+        }
+        if (pendingWin32Key_.active) {
+            flushPendingWin32Key();
+        }
+        if (win32KeySent_[wParam & 0xFF]) {
+            sendWin32KeyRecord(wParam, lParam, false, 0, 1);
+            win32KeySent_[wParam & 0xFF] = false;
+        }
+        return 0;
+    }
     case WM_CHAR: {
+        if (terminal_.win32InputMode()) {
+            const wchar_t ch = static_cast<wchar_t>(wParam);
+            if (pendingWin32Key_.active) {
+                if (ch >= 0xD800 && ch <= 0xDBFF) {
+                    pendingHighSurrogate_ = ch;
+                    return 0;
+                }
+                int unicode = ch;
+                if (pendingWin32Key_.vk == VK_BACK) {
+                    unicode = 8;
+                }
+                if (ch >= 0xDC00 && ch <= 0xDFFF && pendingHighSurrogate_) {
+                    const uint32_t value =
+                        0x10000 + ((static_cast<uint32_t>(pendingHighSurrogate_) - 0xD800) << 10) +
+                        (static_cast<uint32_t>(ch) - 0xDC00);
+                    unicode = static_cast<int>(value);
+                    pendingHighSurrogate_ = 0;
+                }
+                sendWin32KeyRecord(pendingWin32Key_.vk, pendingWin32Key_.lParam, true, unicode,
+                                   pendingWin32Key_.repeat);
+                pendingWin32Key_.active = false;
+                return 0;
+            }
+            pendingHighSurrogate_ = 0;
+            // Dead-key composition or IME text with no pending key: send text directly.
+        }
         if (suppressNextChar_) {
             suppressNextChar_ = false;
             return 0;
@@ -1196,6 +1371,17 @@ LRESULT TerminalView::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) 
         return 0;
     }
     case WM_SYSCHAR:
+        if (terminal_.win32InputMode()) {
+            if (pendingWin32Key_.active) {
+                sendWin32KeyRecord(pendingWin32Key_.vk, pendingWin32Key_.lParam, true,
+                                   static_cast<int>(wParam), pendingWin32Key_.repeat);
+                pendingWin32Key_.active = false;
+            } else if (wParam >= 0x20 && wParam != 0x7F) {
+                const wchar_t ch = static_cast<wchar_t>(wParam);
+                sendUtf16(std::wstring_view(&ch, 1));
+            }
+            return 0;
+        }
         if (wParam >= 0x20 && wParam != 0x7F) {
             const wchar_t ch = static_cast<wchar_t>(wParam);
             sendText("\x1b");

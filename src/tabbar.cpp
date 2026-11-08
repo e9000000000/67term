@@ -139,9 +139,6 @@ void TabBar::computeLayout() {
     tabRects_.clear();
     closeRects_.clear();
     plusRect_ = {};
-    minimizeRect_ = {};
-    maximizeRect_ = {};
-    closeWindowRect_ = {};
 
     if (!hwnd_) {
         return;
@@ -150,12 +147,10 @@ void TabBar::computeLayout() {
     GetClientRect(hwnd_, &client);
     const int width = client.right - client.left;
     const int height = client.bottom;
+    const int burgerWidth = theme::Scale(32, dpi_);
     const int plusWidth = theme::Scale(34, dpi_);
-    const int controlWidth = theme::Scale(42, dpi_);
-    const int controlsWidth = controlWidth * 3;
-    const int tabAreaWidth = std::max(1, width - controlsWidth);
     const int count = static_cast<int>(tabs_.size());
-    const int available = std::max(1, tabAreaWidth - plusWidth);
+    const int available = std::max(1, width - burgerWidth - plusWidth);
     int tabWidth = 0;
     if (count > 0) {
         tabWidth = std::max(theme::Scale(theme::kTabMinWidth, dpi_), available / count);
@@ -164,11 +159,9 @@ void TabBar::computeLayout() {
         }
     }
 
-    minimizeRect_ = {width - controlsWidth, 0, width - controlsWidth * 2 / 3, height};
-    maximizeRect_ = {width - controlsWidth * 2 / 3, 0, width - controlWidth, height};
-    closeWindowRect_ = {width - controlWidth, 0, width, height};
-
-    int x = -scrollX_;
+    menuRect_ = {0, 0, burgerWidth, height};
+    plusRect_ = {width - plusWidth, 0, width, height};
+    int x = burgerWidth - scrollX_;
     for (size_t i = 0; i < tabs_.size(); ++i) {
         RECT tab{x, 0, x + tabWidth, height};
         tabRects_.push_back(tab);
@@ -178,18 +171,15 @@ void TabBar::computeLayout() {
         x += tabWidth;
     }
 
-    const int plusX = x;
-    plusRect_ = {plusX, 0, plusX + plusWidth, height};
-
-    // Clamp scroll so the last tab/plus button is reachable.
-    const int contentRight = plusRect_.right + scrollX_;
-    const int visibleRight = tabAreaWidth;
-    if (contentRight <= visibleRight) {
+    // Keep the plus button fixed at the right edge; only the tabs scroll.
+    const int contentRight = burgerWidth + static_cast<int>(tabs_.size()) * tabWidth;
+    const int viewportRight = width - plusWidth;
+    if (contentRight <= viewportRight) {
         if (scrollX_ != 0) {
             scrollX_ = 0;
         }
-    } else if (scrollX_ > contentRight - visibleRight) {
-        scrollX_ = contentRight - visibleRight;
+    } else if (scrollX_ > contentRight - viewportRight) {
+        scrollX_ = contentRight - viewportRight;
     }
     if (scrollX_ < 0) {
         scrollX_ = 0;
@@ -207,12 +197,13 @@ void TabBar::ensureActiveVisible() {
         return;
     }
     const int width = client.right - client.left;
-    const int visibleRight = width - theme::Scale(42, dpi_) * 3;
+    const int leftEdge = theme::Scale(32, dpi_);
+    const int rightEdge = width - theme::Scale(34, dpi_);
     const RECT& rect = tabRects_[active_];
-    if (rect.left < 0) {
-        scrollX_ += rect.left - theme::Scale(8, dpi_);
-    } else if (rect.right > visibleRight) {
-        scrollX_ += rect.right - visibleRight + theme::Scale(8, dpi_);
+    if (rect.left < leftEdge) {
+        scrollX_ += rect.left - leftEdge;
+    } else if (rect.right > rightEdge) {
+        scrollX_ += rect.right - rightEdge;
     }
     if (scrollX_ < 0) {
         scrollX_ = 0;
@@ -251,6 +242,30 @@ void TabBar::paint(HDC target) {
         DeleteObject(pen);
     };
 
+    if (menuHover_) {
+        FillRectColor(dc, menuRect_, theme::kPanelAlt);
+    }
+    {
+        const int cx = (menuRect_.left + menuRect_.right) / 2;
+        const int cy = (menuRect_.top + menuRect_.bottom) / 2;
+        const int half = theme::Scale(6, dpi_);
+        int thickness = std::max(2, theme::Scale(1, dpi_));
+        if ((thickness % 2) != 0) {
+            ++thickness;
+        }
+        const int step = theme::Scale(4, dpi_);
+        const COLORREF color = menuHover_ ? theme::kText : theme::kTextDim;
+        for (const int offset : {-step, 0, step}) {
+            RECT bar{cx - half, cy + offset - thickness / 2,
+                     cx + half, cy + offset + thickness / 2};
+            FillRectColor(dc, bar, color);
+        }
+    }
+
+    const int viewportLeft = theme::Scale(32, dpi_);
+    const int viewportRight = width - theme::Scale(34, dpi_);
+    const int savedClip = SaveDC(dc);
+    IntersectClipRect(dc, viewportLeft, 0, viewportRight, height);
     for (size_t i = 0; i < tabs_.size(); ++i) {
         const RECT& rect = tabRects_[i];
         if (rect.right < 0 || rect.left > width) {
@@ -307,13 +322,14 @@ void TabBar::paint(HDC target) {
         RECT marker{lineX, theme::Scale(4, dpi_), lineX + theme::Scale(2, dpi_), height - theme::Scale(4, dpi_)};
         FillRectColor(dc, marker, theme::kAccent);
     }
+    RestoreDC(dc, savedClip);
 
     // New-tab plus. Draw it manually so it is exactly centred in its hit area.
     if (plusRect_.right >= 0 && plusRect_.left <= width) {
         const int cx = (plusRect_.left + plusRect_.right) / 2;
         const int cy = (plusRect_.top + plusRect_.bottom) / 2;
         const int half = theme::Scale(6, dpi_);
-        int thickness = std::max(2, theme::Scale(2, dpi_));
+        int thickness = std::max(2, theme::Scale(1, dpi_));
         if ((thickness % 2) != 0) {
             ++thickness;
         }
@@ -324,37 +340,6 @@ void TabBar::paint(HDC target) {
         FillRectColor(dc, horizontal, theme::kTextDim);
         FillRectColor(dc, vertical, theme::kTextDim);
     }
-
-    // Window controls.
-    const auto paintControl = [&](const RECT& rect, int index) {
-        const bool hovered = hoverControl_ == index;
-        if (hovered) {
-            FillRectColor(dc, rect, index == 2 ? theme::kDanger : theme::kTabHover);
-        }
-        const int cx = (rect.left + rect.right) / 2;
-        const int cy = (rect.top + rect.bottom) / 2;
-        const int half = theme::Scale(5, dpi_);
-        const int thickness = std::max(1, theme::Scale(1, dpi_));
-        if (index == 2) {
-            drawCross(rect, hovered ? RGB(255, 255, 255) : theme::kTextDim, half);
-            return;
-        }
-        HPEN pen = CreatePen(PS_SOLID, thickness, hovered ? theme::kText : theme::kTextDim);
-        HGDIOBJ oldPen = SelectObject(dc, pen);
-        if (index == 0) {
-            MoveToEx(dc, cx - half, cy, nullptr);
-            LineTo(dc, cx + half + 1, cy);
-        } else {
-            HGDIOBJ oldBrush = SelectObject(dc, GetStockObject(NULL_BRUSH));
-            Rectangle(dc, cx - half, cy - half, cx + half + 1, cy + half + 1);
-            SelectObject(dc, oldBrush);
-        }
-        SelectObject(dc, oldPen);
-        DeleteObject(pen);
-    };
-    paintControl(minimizeRect_, 0);
-    paintControl(maximizeRect_, 1);
-    paintControl(closeWindowRect_, 2);
 
     // Bottom border.
     RECT bottom{0, height - theme::Scale(1, dpi_), width, height};
@@ -404,9 +389,7 @@ LRESULT TabBar::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
         computeLayout();
         if (hitTest(point.x, point.y) >= 0 ||
             pointIn(plusRect_, point.x, point.y) ||
-            pointIn(minimizeRect_, point.x, point.y) ||
-            pointIn(maximizeRect_, point.x, point.y) ||
-            pointIn(closeWindowRect_, point.x, point.y)) {
+            pointIn(menuRect_, point.x, point.y)) {
             return HTCLIENT;
         }
         return HTTRANSPARENT;
@@ -420,26 +403,6 @@ LRESULT TabBar::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
     case WM_MOUSEMOVE: {
         const int x = GET_X_LPARAM(lParam);
         const int y = GET_Y_LPARAM(lParam);
-        int control = -1;
-        computeLayout();
-        if (pointIn(minimizeRect_, x, y)) {
-            control = 0;
-        } else if (pointIn(maximizeRect_, x, y)) {
-            control = 1;
-        } else if (pointIn(closeWindowRect_, x, y)) {
-            control = 2;
-        }
-        if (control != hoverControl_) {
-            hoverControl_ = control;
-            invalidate();
-        }
-        if (control >= 0) {
-            hover_ = -1;
-            closeHover_ = false;
-            TRACKMOUSEEVENT track{sizeof(track), TME_LEAVE, hwnd_, 0};
-            TrackMouseEvent(&track);
-            return 0;
-        }
         if (dragIndex_ >= 0) {
             if (!dragging_ &&
                 (std::abs(x - dragStartX_) >= theme::Scale(10, dpi_) ||
@@ -456,6 +419,21 @@ LRESULT TabBar::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
             }
         }
         const int hover = hitTest(x, y);
+        const bool overMenu = pointIn(menuRect_, x, y);
+        if (overMenu != menuHover_) {
+            menuHover_ = overMenu;
+            invalidate();
+        }
+        if (overMenu) {
+            if (hover_ != -1 || closeHover_) {
+                hover_ = -1;
+                closeHover_ = false;
+                invalidate();
+            }
+            TRACKMOUSEEVENT track{sizeof(track), TME_LEAVE, hwnd_, 0};
+            TrackMouseEvent(&track);
+            return 0;
+        }
         bool closeHover = false;
         if (hover >= 0 && hover < static_cast<int>(closeRects_.size())) {
             closeHover = pointIn(closeRects_[hover], x, y);
@@ -470,10 +448,10 @@ LRESULT TabBar::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
         return 0;
     }
     case WM_MOUSELEAVE:
-        if (hover_ != -1 || closeHover_ || hoverControl_ != -1) {
+        if (hover_ != -1 || closeHover_ || menuHover_) {
             hover_ = -1;
             closeHover_ = false;
-            hoverControl_ = -1;
+            menuHover_ = false;
             invalidate();
         }
         return 0;
@@ -482,16 +460,8 @@ LRESULT TabBar::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
         const int x = GET_X_LPARAM(lParam);
         const int y = GET_Y_LPARAM(lParam);
         computeLayout();
-        if (pointIn(minimizeRect_, x, y)) {
-            notify(tabbar_events::kMinimize);
-            return 0;
-        }
-        if (pointIn(maximizeRect_, x, y)) {
-            notify(tabbar_events::kMaximize);
-            return 0;
-        }
-        if (pointIn(closeWindowRect_, x, y)) {
-            notify(tabbar_events::kCloseWindow);
+        if (pointIn(menuRect_, x, y)) {
+            notify(tabbar_events::kMenu);
             return 0;
         }
         if (pointIn(plusRect_, x, y)) {

@@ -1,5 +1,6 @@
 #include "app.h"
 
+#include <commdlg.h>
 #include <dwmapi.h>
 #include <shellapi.h>
 #include <windowsx.h>
@@ -20,8 +21,6 @@ namespace {
 
 constexpr wchar_t kMainClass[] = L"67tMainWindow";
 constexpr wchar_t kAppName[] = L"67t";
-constexpr UINT_PTR kTimerStatus = 1;
-constexpr UINT kStatusIntervalMs = 250;
 constexpr int kDefaultFontSize = 16;
 
 void EnableDarkTitleBar(HWND hwnd) {
@@ -157,10 +156,8 @@ bool App::create(const LaunchOptions& options) {
     if (!menuBar_.create(hwnd_, instance_)) {
         return false;
     }
+    ShowWindow(menuBar_.hwnd(), SW_HIDE);
     if (!tabBar_.create(hwnd_, instance_)) {
-        return false;
-    }
-    if (!statusBar_.create(hwnd_, instance_)) {
         return false;
     }
 
@@ -194,7 +191,6 @@ bool App::create(const LaunchOptions& options) {
     if (settings_.maximized) {
         ShowWindow(hwnd_, SW_MAXIMIZE);
     }
-    SetTimer(hwnd_, kTimerStatus, kStatusIntervalMs, nullptr);
     if (TermTab* tab = activeTab()) {
         tab->view->focus();
     }
@@ -283,7 +279,6 @@ TermTab& App::addTab(const std::wstring& workingDirectory) {
         tabs_.push_back(std::move(tab));
         active_ = static_cast<int>(tabs_.size()) - 1;
         updateTabBar();
-        updateStatus();
         return *tabs_.back();
     }
     tab->view->setAppearance(settings_.fontFamily, settings_.fontSize, settings_.cursorBlink,
@@ -300,7 +295,6 @@ TermTab& App::addTab(const std::wstring& workingDirectory) {
         added.exited = true;
     }
     updateTabBar();
-    updateStatus();
     updateTitle();
     added.view->focus();
     return added;
@@ -322,7 +316,6 @@ void App::selectTab(int index) {
     }
     layout();
     updateTabBar();
-    updateStatus();
     updateTitle();
     if (TermTab* tab = activeTab()) {
         tab->view->focus();
@@ -360,7 +353,6 @@ void App::closeTab(int index) {
     }
     layout();
     updateTabBar();
-    updateStatus();
     updateTitle();
     if (TermTab* current = activeTab()) {
         current->view->focus();
@@ -383,7 +375,6 @@ void App::closeOtherTabs(int keep) {
     active_ = 0;
     layout();
     updateTabBar();
-    updateStatus();
     updateTitle();
     if (TermTab* tab = activeTab()) {
         tab->view->focus();
@@ -426,11 +417,11 @@ void App::newWindow() {
     }
 }
 
-void App::refreshMenuState() {
+MenuState App::currentMenuState() {
     MenuState state;
     TermTab* tab = activeTab();
     state.hasTab = tab != nullptr;
-    if (tab) {
+    if (tab && tab->view) {
         state.running = tab->view->sessionRunning();
         state.exited = tab->view->exited();
         state.hasSelection = tab->view->hasSelection();
@@ -440,7 +431,75 @@ void App::refreshMenuState() {
     state.fontSize = settings_.fontSize;
     state.scrollback = settings_.scrollback;
     state.shell = shellDisplayName();
-    menuBar_.setState(state);
+    return state;
+}
+
+void App::showBurgerMenu(int section) {
+    const MenuState state = currentMenuState();
+    const bool has = state.hasTab;
+    std::vector<MenuItem> items;
+    const auto add = [&](UINT id, const wchar_t* label, const wchar_t* shortcut = L"",
+                         bool enabled = true, bool checked = false) {
+        items.push_back(MakeMenuItem(id, label, shortcut, enabled, checked));
+    };
+    const auto separator = [&]() { items.push_back(MakeSeparator()); };
+
+    switch (section) {
+    case -1:
+        add(kCmdMenuFile, L"File", L"Alt+F");
+        add(kCmdMenuEdit, L"Edit", L"Alt+E");
+        add(kCmdMenuView, L"View", L"Alt+V");
+        add(kCmdMenuHelp, L"Help", L"Alt+H");
+        break;
+    case 0:
+        add(kCmdNewTab, L"New Tab", L"Ctrl+Shift+T");
+        add(kCmdNewWindow, L"New Window", L"Ctrl+Shift+N");
+        add(kCmdDuplicateTab, L"Duplicate Tab", L"", has);
+        add(kCmdRestartShell, L"Restart Shell", L"Ctrl+Shift+R", has);
+        separator();
+        add(kCmdCloseTab, L"Close Tab", L"Ctrl+Shift+W", has);
+        add(kCmdCloseOthers, L"Close Other Tabs", L"", tabs_.size() > 1);
+        add(kCmdCloseAll, L"Close All Tabs", L"", !tabs_.empty());
+        separator();
+        add(kCmdExit, L"Exit", L"Alt+F4");
+        break;
+    case 1:
+        add(kCmdCopy, L"Copy", L"Ctrl+Shift+C", state.hasSelection);
+        add(kCmdPaste, L"Paste", L"Ctrl+Shift+V", state.running);
+        add(kCmdSelectAll, L"Select All", L"Ctrl+Shift+A", has);
+        add(kCmdClearSelection, L"Clear Selection", L"", state.hasSelection);
+        separator();
+        add(kCmdScrollTop, L"Scroll to Top", L"Ctrl+Shift+Home", has);
+        add(kCmdScrollBottom, L"Scroll to Bottom", L"Ctrl+Shift+End", has);
+        add(kCmdClearScrollback, L"Clear Scrollback", L"Ctrl+Shift+K", has);
+        break;
+    case 2:
+        add(kCmdZoomIn, L"Zoom In", L"Ctrl++", has);
+        add(kCmdZoomOut, L"Zoom Out", L"Ctrl+-", has);
+        add(kCmdZoomReset, L"Reset Zoom", L"Ctrl+0", has);
+        add(kCmdFont, L"Font...", L"", true);
+        separator();
+        add(kCmdToggleFullscreen, L"Full Screen", L"F11", true, state.fullscreen);
+        add(kCmdToggleCursorBlink, L"Blinking Cursor", L"", true, state.cursorBlink);
+        separator();
+        add(kCmdScrollback1k, L"Scrollback: 1,000 lines", L"", true,
+            state.scrollback == 1000);
+        add(kCmdScrollback10k, L"Scrollback: 10,000 lines", L"", true,
+            state.scrollback == 10000);
+        add(kCmdScrollback50k, L"Scrollback: 50,000 lines", L"", true,
+            state.scrollback == 50000);
+        break;
+    case 3:
+        add(kCmdOpenSettings, L"Open Settings Folder");
+        add(kCmdAbout, L"About 67t");
+        break;
+    default:
+        return;
+    }
+
+    POINT anchor{theme::Scale(2, dpi_), tabBar_.preferredHeight(hwnd_)};
+    ClientToScreen(hwnd_, &anchor);
+    menuBar_.showContextMenu(anchor, std::move(items));
 }
 
 void App::onCommand(UINT id) {
@@ -476,7 +535,6 @@ void App::onCommand(UINT id) {
             tab->exited = false;
             tab->view->restart();
             updateTabBar();
-            updateStatus();
         }
         break;
     case kCmdExit:
@@ -564,16 +622,19 @@ void App::onCommand(UINT id) {
         openSettingsFolder();
         break;
     case kCmdMenuFile:
-        menuBar_.openMenu(0);
+        showBurgerMenu(0);
         break;
     case kCmdMenuEdit:
-        menuBar_.openMenu(1);
+        showBurgerMenu(1);
         break;
     case kCmdMenuView:
-        menuBar_.openMenu(2);
+        showBurgerMenu(2);
         break;
     case kCmdMenuHelp:
-        menuBar_.openMenu(3);
+        showBurgerMenu(3);
+        break;
+    case kCmdFont:
+        showFontDialog();
         break;
     default:
         break;
@@ -596,7 +657,6 @@ void App::applyFontSize(int size) {
     applySettingsToAllViews();
     SaveSettings(settings_);
     layout();
-    updateStatus();
 }
 
 void App::applyScrollback(int lines) {
@@ -605,14 +665,12 @@ void App::applyScrollback(int lines) {
         tab->view->setScrollbackLimit(settings_.scrollback);
     }
     SaveSettings(settings_);
-    updateStatus();
 }
 
 void App::applyCursorBlink(bool enabled) {
     settings_.cursorBlink = enabled;
     applySettingsToAllViews();
     SaveSettings(settings_);
-    refreshMenuState();
 }
 
 void App::toggleFullscreen() {
@@ -645,8 +703,6 @@ void App::toggleFullscreen() {
         fullscreen_ = false;
     }
     layout();
-    refreshMenuState();
-    updateStatus();
 }
 
 void App::saveWindowPlacement() {
@@ -657,6 +713,37 @@ void App::saveWindowPlacement() {
         settings_.hasWindow = true;
         settings_.maximized = placement.showCmd == SW_SHOWMAXIMIZED;
     }
+    SaveSettings(settings_);
+}
+
+void App::showFontDialog() {
+    LOGFONTW logFont{};
+    logFont.lfHeight = -MulDiv(std::max(6, settings_.fontSize), static_cast<int>(dpi_), 72);
+    logFont.lfWeight = FW_NORMAL;
+    logFont.lfCharSet = DEFAULT_CHARSET;
+    lstrcpynW(logFont.lfFaceName, settings_.fontFamily.c_str(), LF_FACESIZE);
+
+    CHOOSEFONTW choose{};
+    choose.lStructSize = sizeof(choose);
+    choose.hwndOwner = hwnd_;
+    choose.lpLogFont = &logFont;
+    choose.iPointSize = settings_.fontSize * 10;
+    choose.Flags = CF_SCREENFONTS | CF_INITTOLOGFONTSTRUCT | CF_FORCEFONTEXIST |
+                   CF_FIXEDPITCHONLY | CF_NOVERTFONTS;
+    if (!ChooseFontW(&choose)) {
+        return;
+    }
+
+    int size = choose.iPointSize / 10;
+    if (size <= 0) {
+        size = MulDiv(-logFont.lfHeight, 72, static_cast<int>(dpi_));
+    }
+    settings_.fontSize = std::clamp(size, 6, 72);
+    if (logFont.lfFaceName[0] != L'\0') {
+        settings_.fontFamily = logFont.lfFaceName;
+    }
+    applySettingsToAllViews();
+    layout();
     SaveSettings(settings_);
 }
 
@@ -762,14 +849,11 @@ void App::layout() {
     }
     dpi_ = DpiOfWindow(hwnd_);
     const int tabHeight = tabBar_.preferredHeight(hwnd_);
-    const int menuHeight = menuBar_.preferredHeight(hwnd_);
-    const int statusHeight = statusBar_.preferredHeight(hwnd_);
-    const int contentTop = tabHeight + menuHeight;
-    const int contentHeight = std::max(0, height - contentTop - statusHeight);
+    const int contentTop = tabHeight;
+    const int contentHeight = std::max(0, height - contentTop);
 
     tabBar_.layout(0, 0, width, tabHeight);
-    menuBar_.layout(0, tabHeight, width, menuHeight);
-    statusBar_.layout(0, height - statusHeight, width, statusHeight);
+    menuBar_.layout(0, 0, 0, 0);
 
     for (size_t i = 0; i < tabs_.size(); ++i) {
         TermTab& tab = *tabs_[i];
@@ -799,47 +883,6 @@ void App::updateTabBar() {
         visuals.push_back(TabVisual{title, tab->activity});
     }
     tabBar_.setTabs(std::move(visuals), active_);
-}
-
-void App::updateStatus() {
-    if (!statusBar_.hwnd()) {
-        return;
-    }
-    StatusInfo info;
-    TermTab* tab = activeTab();
-    if (tab && tab->view) {
-        info.position = L"Ln " + std::to_wstring(tab->view->cursorRow() + 1) + L", Col " +
-                        std::to_wstring(tab->view->cursorColumn() + 1);
-        info.size = std::to_wstring(tab->view->columns()) + L"x" +
-                    std::to_wstring(tab->view->rows());
-        const int scrollback = tab->view->scrollbackLines();
-        const int offset = tab->view->scrollOffset();
-        if (scrollback > 0) {
-            info.scrollback = L"Scrollback " + std::to_wstring(scrollback);
-            if (offset > 0) {
-                info.scrollback += L" (+" + std::to_wstring(offset) + L")";
-            }
-        }
-        info.shell = shellDisplayName();
-        if (tab->view->startFailed()) {
-            info.message = L"Shell failed to start";
-        } else if (tab->view->exited()) {
-            info.message = L"Process exited - Ctrl+Shift+R to restart";
-        } else if (offset > 0) {
-            info.mode = L"SCROLLBACK";
-        } else if (tab->view->hasSelection()) {
-            info.mode = L"SELECTION";
-        } else {
-            info.mode = L"ConPTY";
-        }
-        if (tab->view->processId() != 0 && !tab->view->exited()) {
-            info.right = L"PID " + std::to_wstring(tab->view->processId());
-        }
-    } else {
-        info.message = L"No terminal";
-    }
-    statusBar_.setInfo(info);
-    refreshMenuState();
 }
 
 void App::updateTitle() {
@@ -886,14 +929,10 @@ LRESULT App::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
                 updateTabBar();
                 if (index == active_) {
                     updateTitle();
-                    updateStatus();
                 }
             }
             return 0;
         case kViewStateChanged:
-            if (indexOfView(reinterpret_cast<HWND>(wParam)) == active_) {
-                updateStatus();
-            }
             return 0;
         case kViewExited:
             if (const int index = indexOfView(reinterpret_cast<HWND>(wParam)); index >= 0) {
@@ -902,7 +941,6 @@ LRESULT App::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
                 tab.activity = true;
                 updateTabBar();
                 if (index == active_) {
-                    updateStatus();
                     updateTitle();
                 }
                 FLASHWINFO flash{sizeof(flash), hwnd_, FLASHW_TRAY | FLASHW_TIMERNOFG, 3, 0};
@@ -953,7 +991,7 @@ LRESULT App::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
     case WM_NCHITTEST: {
         POINT client{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
         ScreenToClient(hwnd_, &client);
-        const int titleBottom = tabBar_.preferredHeight(hwnd_) + menuBar_.preferredHeight(hwnd_);
+        const int titleBottom = tabBar_.preferredHeight(hwnd_);
         if (client.x >= 0 && client.y >= 0 && client.y < titleBottom) {
             return HTCAPTION;
         }
@@ -1009,14 +1047,8 @@ LRESULT App::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
             tab->view->applyDpi(dpi_);
         }
         layout();
-        updateStatus();
         return 0;
     }
-    case WM_TIMER:
-        if (wParam == kTimerStatus) {
-            updateStatus();
-        }
-        return 0;
     case WM_DROPFILES:
         handleDropFiles(wParam);
         return 0;
@@ -1029,14 +1061,8 @@ LRESULT App::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
     case tabbar_events::kNew:
         addTab(defaultWorkingDirectory());
         return 0;
-    case tabbar_events::kMinimize:
-        ShowWindow(hwnd_, SW_MINIMIZE);
-        return 0;
-    case tabbar_events::kMaximize:
-        ShowWindow(hwnd_, IsZoomed(hwnd_) ? SW_RESTORE : SW_MAXIMIZE);
-        return 0;
-    case tabbar_events::kCloseWindow:
-        PostMessageW(hwnd_, WM_CLOSE, 0, 0);
+    case tabbar_events::kMenu:
+        showBurgerMenu(-1);
         return 0;
     case tabbar_events::kReorder: {
         const int from = static_cast<int>(wParam);
@@ -1053,7 +1079,6 @@ LRESULT App::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
             }
             updateTabBar();
             layout();
-            updateStatus();
         }
         return 0;
     }
@@ -1083,7 +1108,6 @@ LRESULT App::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
         DestroyWindow(hwnd_);
         return 0;
     case WM_DESTROY:
-        KillTimer(hwnd_, kTimerStatus);
         closeAllTabs();
         if (accel_) {
             DestroyAcceleratorTable(accel_);

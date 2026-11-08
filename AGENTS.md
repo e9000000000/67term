@@ -6,19 +6,20 @@ real shells through ConPTY, scrollback, selection, and mouse reporting. It is
 Tauri, and no telemetry or network access at runtime.
 
 The look and interaction model follow the sibling project `../67ed`: compact
-custom title/tab row, custom dark menu bar, dark status bar, one blue accent,
-small native Win32 controls, no installer.
+custom title/tab row with a burger menu, one blue accent, small native Win32
+controls, no installer, no menu bar or status bar.
 
 ## Current state
 
 M0 and M1 are complete, and M2 is partly done. The app builds as one x64
-executable (~450 KiB) and runs real shells through ConPTY. It has: custom dark
-title/tab/menu/status chrome, multiple tabs with drag reorder and context menus,
-a UTF-8 VT parser with 16/256/24-bit color, wide characters, alternate screen,
-scroll regions and scrollback, a GDI renderer with cursor styles and selection,
-keyboard/mouse/IME input, bracketed paste, shell-exit detection and restart,
-font zoom, fullscreen, settings/window persistence, drag-and-drop, OSC titles,
-OSC 7 working directories and OSC 52 clipboard writes.
+executable (~460 KiB) and runs real shells through ConPTY. It has: custom dark
+title/tab chrome with a burger menu and fixed new-tab button, multiple tabs with
+drag reorder and context menus, a UTF-8 VT parser with 16/256/24-bit color, wide
+characters, alternate screen, scroll regions and scrollback, a GDI renderer with
+cursor styles and selection, keyboard/mouse/IME input (including Win32 input
+mode), bracketed paste, shell-exit detection and restart, font settings, font
+zoom, fullscreen, settings/window persistence, drag-and-drop, OSC titles, OSC 7
+working directories and OSC 52 clipboard writes.
 
 Known gaps: scrollback search, split panes, OSC 8 hyperlinks, shell-integration
 marks, and restoring tabs across restarts. Read `docs/PLAN.md` for milestones and
@@ -60,9 +61,8 @@ src/
   accel.*           application accelerators
   commands.h        command IDs shared by menu, accelerators, app
   app.*             main window, tabs, chrome layout, commands, menus
-  menubar.*         custom dark menu bar and owner-drawn popups
-  tabbar.*          custom dark tab strip (reorder, close, context menu)
-  statusbar.*       custom status bar
+  menubar.*         hidden host for owner-drawn dark popup menus
+  tabbar.*          title/tab strip: burger menu, tabs, fixed new-tab button
   theme.h           palette, metrics, DPI helpers
   util.*            UTF conversions, paths, errors, dark-mode helpers
   settings.*        settings.ini and window-placement persistence
@@ -123,8 +123,8 @@ Measure with `67t.exe --bench-startup` and the self-test timings:
 
 Do not regress these without updating the plan and recording numbers.
 
-Latest measured release build: 460,800-byte EXE; 10,000 colored lines parsed and
-stored in 24.2 ms; resize cycle 5.3 ms; ~50 MB RSS with 10k scrollback lines;
+Latest measured release build: 470,528-byte EXE; 10,000 colored lines parsed and
+stored in 18.5 ms; resize cycle 5.9 ms; ~50 MB RSS with 10k scrollback lines;
 hidden chrome construction under 1 ms.
 
 ## Conventions
@@ -155,12 +155,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests\run-selftest.ps1
 - `--selftest`: CLI parsing, UTF-8, VT parser across chunk boundaries, cursor
   movement, SGR colors, erase/insert/delete, scroll regions, alt screen, tab
   stops, wide characters, OSC titles, DA/DSR responses, scrollback trimming,
-  resize, key encoding, mouse/paste encoding, ConPTY spawn + echo + exit.
-  Results are JSON-ish lines; expect `summary passed=73 failed=0`.
+  resize, key encoding, mouse/paste encoding, Win32 input-mode records,
+  ConPTY spawn + echo + exit, and a live PowerShell Ctrl+Backspace edit.
+  Results are JSON-ish lines; expect `summary passed=82 failed=0`.
 - `--bench [lines]`: parser/screen microbenchmarks on synthetic colored output.
 - `--bench-startup`: hidden chrome construction timing and RSS.
 - Manual smoke: PowerShell and cmd tabs, `dir`, `git status`, colors, Unicode,
-  resize, scrollback wheel, select/copy/paste, Ctrl+C, arrows in a REPL, mouse
+  resize, scrollback wheel, select/copy/paste, Ctrl+C, Ctrl+Backspace/Ctrl+Delete,
+  arrows in a REPL, mouse
   reporting (`more`, vim if installed), DPI 125/150/200%, close tab while a
   process runs, exit the shell and restart the tab.
 
@@ -172,8 +174,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests\run-selftest.ps1
   decoder state across feeds.
 - `ClosePseudoConsole` can block briefly while the client tears down. Never call
   it from the reader thread.
-- Windows Terminal's "win32 input mode" (`CSI ? 9001 h`) is ignored; the default
-  VT input path is used.
+- ConPTY requests Win32 input mode (`CSI ? 9001 h`). We honor it: key-down/up
+  records carry VK, scan code, Unicode, control state, and repeats. If the mode
+  is disabled, fall back to classic xterm key sequences.
 - Some Windows 10 builds wrap output in extra VT sequences; ignore unknown
   private modes and CSI commands rather than failing.
 - Selection should preserve wide characters and not copy continuation cells.

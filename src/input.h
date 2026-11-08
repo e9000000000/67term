@@ -23,6 +23,11 @@ bool EncodeKey(const KeyEvent& event, std::string& sequence);
 std::string EncodeMouse(int button, int x, int y, bool release, bool motion, bool sgr,
                         int modifiers);
 
+// Win32 Input Mode record: CSI Vk;Sc;Uc;Kd;Cs;Rc _
+// (as requested by ConPTY through CSI ? 9001 h).
+std::string EncodeWin32Key(int vk, int scanCode, int unicode, bool keyDown, int controlState,
+                           int repeat);
+
 std::wstring NormalizePaste(std::wstring_view text);
 
 }  // namespace input

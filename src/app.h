@@ -9,7 +9,6 @@
 #include "cli.h"
 #include "menubar.h"
 #include "settings.h"
-#include "statusbar.h"
 #include "tabbar.h"
 #include "view.h"
 
@@ -34,12 +33,12 @@ private:
     LRESULT handleMessage(UINT message, WPARAM wParam, LPARAM lParam);
 
     void createAccelerators();
-    void refreshMenuState();
+    MenuState currentMenuState();
+    void showBurgerMenu(int section);
     void onCommand(UINT id);
 
     void layout();
     void updateTabBar();
-    void updateStatus();
     void updateTitle();
 
     TermTab* activeTab();
@@ -65,6 +64,7 @@ private:
 
     void saveWindowPlacement();
     void showAbout();
+    void showFontDialog();
     void openSettingsFolder();
     void showViewContextMenu(HWND view, POINT screenPoint);
     void showTabContextMenu(int index, POINT screenPoint);
@@ -78,7 +78,6 @@ private:
 
     MenuBar menuBar_;
     TabBar tabBar_;
-    StatusBar statusBar_;
 
     std::vector<std::unique_ptr<TermTab>> tabs_;
     int active_ = -1;

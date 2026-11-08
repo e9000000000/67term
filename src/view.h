@@ -107,6 +107,11 @@ private:
     void sendMouse(WORD button, int x, int y, bool press, bool wheel, int wheelDelta);
     std::string encodeMouse(int button, int x, int y, bool release, bool motion) const;
 
+    void sendWin32KeyRecord(WPARAM vk, LPARAM lParam, bool keyDown, int unicode, int repeat);
+    void flushPendingWin32Key();
+    int win32ControlState(WPARAM vk, bool extended) const;
+    bool keyProducesCharacter(WPARAM vk) const;
+
     void beginSelection(int x, int y);
     void updateSelection(int x, int y);
     void endSelection();
@@ -180,4 +185,14 @@ private:
     wchar_t pendingHighSurrogate_ = 0;
     bool suppressNextChar_ = false;
     bool searchActive_ = false;
+
+    struct PendingWin32Key {
+        bool active = false;
+        WPARAM vk = 0;
+        LPARAM lParam = 0;
+        bool extended = false;
+        int repeat = 1;
+    };
+    PendingWin32Key pendingWin32Key_;
+    bool win32KeySent_[256]{};
 };

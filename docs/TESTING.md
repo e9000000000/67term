@@ -10,7 +10,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests\run-startup.ps1
 ```
 
 The self-test creates no visible window. It writes `build\selftest.log` and exits
-non-zero on a failure. Current check count: **73** (`summary passed=73 failed=0`).
+non-zero on a failure. Current check count: **82** (`summary passed=82 failed=0`).
 
 Coverage:
 
@@ -21,9 +21,10 @@ Coverage:
 - bracketed paste, application cursor keys, mouse modes, alternate screen
 - scrollback growth/limit/offset, resize, split CSI sequences, invalid UTF-8
 - DECALN, save/restore cursor, REP, tab stops, scroll region
-- key encoding (arrows, modifiers, function keys, Shift+Tab)
+- key encoding (arrows, modifiers, function keys, Shift+Tab), Win32 input records
 - SGR/legacy mouse encoding and paste newline normalization
 - real ConPTY: spawn, output, `TERM` environment, resize, child exit
+- live PowerShell: Win32 input mode and Ctrl+Backspace word deletion
 - hidden chrome construction timing
 
 The PTY checks start `cmd.exe` inside a real pseudo console; no shell output is
@@ -34,23 +35,24 @@ scraped from a redirected console.
 `--bench [lines]` builds colored, wide-character output and feeds it to the VT
 engine, then measures a resize cycle and process RSS.
 
-`--bench-startup` creates a hidden host window plus the menu bar, tab bar, status
-bar, and terminal view, and reports construction time and RSS.
+`--bench-startup` creates a hidden host window plus the burger/tab strip and
+terminal view, and reports construction time and RSS.
 
 Reference numbers (this machine, release build):
 
 | Metric | Value |
 |---|---|
-| EXE | 460,800 bytes |
-| 10,000 lines parse + store | 24.2 ms |
-| Resize cycle (100x30 → 140x45 → 120x40) | 5.3 ms |
+| EXE | 470,528 bytes |
+| 10,000 lines parse + store | 18.5 ms |
+| Resize cycle (100x30 → 140x45 → 120x40) | 5.9 ms |
 | RSS with 10k scrollback lines | ~50 MB |
 | Hidden chrome construction | < 1 ms |
 
 ## Manual smoke
 
 - Launch: prompt appears in under a second; title and tab show the shell.
-- Type `echo hello`, arrows, backspace, `Ctrl+C`; run `git status` for color.
+- Type `echo hello`, arrows, backspace, `Ctrl+C`, `Ctrl+Backspace`, `Ctrl+Delete`;
+  run `git status` for color.
 - Run a long command (`dir -Recurse C:\Windows`) and wheel/Shift+PageUp.
 - Select text, `Ctrl+Shift+C`, paste into another app, `Ctrl+Shift+V` back.
 - `Ctrl+Shift+T` twice, switch with `Ctrl+Tab`, drag tabs, middle-click/close.

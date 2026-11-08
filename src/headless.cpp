@@ -12,7 +12,6 @@
 #include "input.h"
 #include "menubar.h"
 #include "pty.h"
-#include "statusbar.h"
 #include "tabbar.h"
 #include "terminal.h"
 #include "theme.h"
@@ -67,6 +66,30 @@ void WriteLog(const std::wstring& path, const std::wstring& text) {
 std::wstring CellText(const vt::Terminal& terminal, int x, int y) {
     const vt::Cell& cell = terminal.viewCell(x, y);
     return std::wstring(cell.text);
+}
+
+std::wstring ScreenText(const vt::Terminal& terminal) {
+    std::wstring text;
+    for (int y = 0; y < terminal.rows(); ++y) {
+        std::wstring row;
+        for (int x = 0; x < terminal.columns(); ++x) {
+            const vt::Cell& cell = terminal.viewCell(x, y);
+            if (cell.width == 0) {
+                continue;
+            }
+            if (cell.text[0] == 0) {
+                row.push_back(L' ');
+            } else {
+                row.append(cell.text);
+            }
+        }
+        while (!row.empty() && row.back() == L' ') {
+            row.pop_back();
+        }
+        text.append(row);
+        text.push_back(L'\n');
+    }
+    return text;
 }
 
 size_t ProcessRssBytes() {
@@ -171,6 +194,10 @@ void TestScreen(Harness& h) {
     modes.feed("\x1b[?1002h\x1b[?1006h");
     h.check(modes.mouseTracking() && modes.mouseTrackingMode() == 1002 && modes.sgrMouse(),
             L"screen: mouse modes");
+    modes.feed("\x1b[?9001h");
+    h.check(modes.win32InputMode(), L"screen: win32 input mode on");
+    modes.feed("\x1b[?9001l");
+    h.check(!modes.win32InputMode(), L"screen: win32 input mode off");
 
     modes.feed("\x1b[?1049h");
     h.check(modes.altScreen(), L"screen: alt screen enter");
@@ -270,6 +297,11 @@ void TestInput(Harness& h) {
     const std::string legacy = input::EncodeMouse(0, 0, 0, true, false, false, 0);
     h.check(legacy.size() == 6 && legacy[3] == static_cast<char>(32 + 3), L"input: legacy release");
 
+    h.check(input::EncodeWin32Key(89, 21, 25, true, 8, 1) == "\x1b[89;21;25;1;8;1_",
+            L"input: win32 key record");
+    h.check(input::EncodeWin32Key(8, 14, 0, false, 8, 1) == "\x1b[8;14;0;0;8;1_",
+            L"input: win32 key release");
+
     h.check(input::NormalizePaste(L"a\r\nb\rc\nd") == L"a\rb\rc\nd", L"input: paste newlines");
 }
 
@@ -343,6 +375,107 @@ void TestPty(Harness& h) {
     }
 }
 
+void TestWin32Input(Harness& h) {
+    if (!PtySession::available()) {
+        return;
+    }
+    PtySession session;
+    std::wstring error;
+    if (!session.start(L"powershell.exe -NoLogo -NoProfile", ExeDirectory(), 100, 30, nullptr,
+                       error)) {
+        h.check(false, L"win32 input: session start", error);
+        return;
+    }
+
+    vt::Terminal terminal(100, 30, 1000);
+    const auto pump = [&]() {
+        std::string data;
+        if (session.drain(data)) {
+            terminal.feed(data);
+        }
+    };
+
+    const ULONGLONG readyDeadline = GetTickCount64() + 15000;
+    while (GetTickCount64() < readyDeadline) {
+        pump();
+        if (terminal.win32InputMode() && ScreenText(terminal).find(L"PS ") != std::wstring::npos) {
+            break;
+        }
+        Sleep(20);
+    }
+    h.check(terminal.win32InputMode(), L"win32 input: ConPTY enabled the mode");
+
+    const auto key = [&](int vk, int ch, bool ctrl) {
+        const int scan = static_cast<int>(MapVirtualKeyW(static_cast<UINT>(vk), MAPVK_VK_TO_VSC));
+        const int state = ctrl ? 0x0008 : 0;
+        session.write(input::EncodeWin32Key(vk, scan, ch, true, state, 1));
+        session.write(input::EncodeWin32Key(vk, scan, 0, false, state, 1));
+        Sleep(25);
+    };
+
+    for (const wchar_t ch : std::wstring(L"echo abc def")) {
+        if (ch == L' ') {
+            key(VK_SPACE, L' ', false);
+        } else if (ch >= L'a' && ch <= L'z') {
+            key(ch - L'a' + L'A', ch, false);
+        } else if (ch >= L'0' && ch <= L'9') {
+            key(ch, ch, false);
+        }
+    }
+    key(VK_BACK, 8, true);
+    key(VK_RETURN, 13, false);
+
+    const ULONGLONG resultDeadline = GetTickCount64() + 8000;
+    std::wstring screen;
+    while (GetTickCount64() < resultDeadline) {
+        pump();
+        screen = ScreenText(terminal);
+        if (screen.find(L"echo abc") != std::wstring::npos &&
+            screen.find(L"abc") != std::wstring::npos) {
+            break;
+        }
+        Sleep(30);
+    }
+    screen = ScreenText(terminal);
+    h.check(screen.find(L"echo abc") != std::wstring::npos,
+            L"win32 input: Ctrl+Backspace edited the command line",
+            screen.substr(0, 240));
+    h.check(screen.find(L"def") == std::wstring::npos,
+            L"win32 input: deleted word is gone");
+
+    // Without a WM_CHAR character, the key-up flush still carries VK_BACK + Ctrl.
+    for (const wchar_t ch : std::wstring(L"echo one two")) {
+        if (ch == L' ') {
+            key(VK_SPACE, L' ', false);
+        } else if (ch >= L'a' && ch <= L'z') {
+            key(ch - L'a' + L'A', ch, false);
+        }
+    }
+    {
+        const int scan = static_cast<int>(MapVirtualKeyW(VK_BACK, MAPVK_VK_TO_VSC));
+        session.write(input::EncodeWin32Key(VK_BACK, scan, 0, true, 0x0008, 1));
+        session.write(input::EncodeWin32Key(VK_BACK, scan, 0, false, 0x0008, 1));
+    }
+    key(VK_RETURN, 13, false);
+
+    const ULONGLONG secondDeadline = GetTickCount64() + 8000;
+    while (GetTickCount64() < secondDeadline) {
+        pump();
+        screen = ScreenText(terminal);
+        if (screen.find(L"echo one") != std::wstring::npos &&
+            screen.find(L"one") != std::wstring::npos) {
+            break;
+        }
+        Sleep(30);
+    }
+    screen = ScreenText(terminal);
+    h.check(screen.find(L"echo one") != std::wstring::npos,
+            L"win32 input: Ctrl+Backspace works with an empty Unicode field",
+            screen.substr(0, 240));
+    h.check(screen.find(L"two") == std::wstring::npos, L"win32 input: second word is gone");
+    session.close();
+}
+
 LRESULT CALLBACK HiddenHostProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
     return DefWindowProcW(hwnd, message, wParam, lParam);
 }
@@ -361,17 +494,14 @@ void TestStartupComponents(Harness& h) {
         const ULONGLONG start = GetTickCount64();
         MenuBar menu;
         TabBar tabs;
-        StatusBar status;
         TerminalView view;
-        const bool chrome = menu.create(host, wc.hInstance) && tabs.create(host, wc.hInstance) &&
-                            status.create(host, wc.hInstance);
+        const bool chrome = menu.create(host, wc.hInstance) && tabs.create(host, wc.hInstance);
         const bool viewCreated = view.create(host, wc.hInstance);
         h.check(chrome, L"startup: chrome creates");
         h.check(viewCreated, L"startup: terminal view creates");
         menu.layout(0, 0, 1200, 28);
         tabs.layout(0, 0, 1200, 28);
-        status.layout(0, 752, 1200, 24);
-        view.layout(0, 56, 1200, 696);
+        view.layout(0, 28, 1200, 724);
         const ULONGLONG elapsed = GetTickCount64() - start;
         h.check(elapsed < 500, L"startup: chrome construction under 500 ms",
                 std::to_wstring(elapsed) + L" ms");
@@ -392,6 +522,7 @@ int RunSelfTest(const std::wstring& logPath) {
     TestScreen(harness);
     TestInput(harness);
     TestPty(harness);
+    TestWin32Input(harness);
     TestStartupComponents(harness);
 
     harness.summary();
@@ -452,14 +583,12 @@ int RunStartupBench(const std::wstring& logPath) {
                                 780, nullptr, nullptr, wc.hInstance, nullptr);
     MenuBar menu;
     TabBar tabs;
-    StatusBar status;
     TerminalView view;
     const bool ok = host && menu.create(host, wc.hInstance) && tabs.create(host, wc.hInstance) &&
-                    status.create(host, wc.hInstance) && view.create(host, wc.hInstance);
+                    view.create(host, wc.hInstance);
     menu.layout(0, 0, 1200, 28);
     tabs.layout(0, 0, 1200, 28);
-    status.layout(0, 752, 1200, 24);
-    view.layout(0, 56, 1200, 696);
+    view.layout(0, 28, 1200, 724);
     const ULONGLONG elapsed = GetTickCount64() - start;
 
     output.line(L"67t startup bench");

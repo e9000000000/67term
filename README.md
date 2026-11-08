@@ -6,15 +6,18 @@ A native Windows terminal emulator: dark, tabbed, small, and powered by a real
 ConPTY shell. Same visual language as [67ed](../67ed).
 
 - Native Win32 + GDI + ConPTY, C++20, static build — one `.exe`
-- Dark chrome: compact title/tab row with integrated minimize/maximize/close
+- Dark chrome: compact title/tab row with a burger menu and fixed new-tab button
 - Real PowerShell / cmd / any console program, UTF-8 VT input and output
 - Tabs with drag reorder, close buttons, OSC titles
 - 10,000-line scrollback (configurable), wheel and keyboard scrolling
 - 16/256/24-bit color, bold/italic/underline/strike, cursor styles
 - Selection, copy/paste, bracketed paste, mouse reporting, IME input
 - UTF-8 and wide characters, alternate screen, scroll regions, DEC private modes
+- Win32 input mode: Ctrl+Backspace, Ctrl+Delete, Alt+arrows and the rest of the
+  Windows key space behave like Windows Terminal
 - Resize reflows the ConPTY grid; close a tab and its shell is terminated
-- Remembers window placement, font size, scrollback, and cursor blink
+- Font chooser (fixed-pitch, size), font zoom, fullscreen
+- Remembers window placement, font, scrollback, and cursor blink
 
 ## Build
 
@@ -55,8 +58,9 @@ build\67t.exe C:\src                # a directory argument sets the start dir
 | Scroll back / forward | wheel, `Shift+PageUp` / `Shift+PageDown` |
 | Scroll to top / bottom | `Ctrl+Shift+Home` / `Ctrl+Shift+End` |
 
-`Ctrl+C`, `Ctrl+D`, `Ctrl+Z`, arrows, function keys, and the rest of the normal
-keyboard go to the shell.
+`Ctrl+C`, `Ctrl+D`, `Ctrl+Z`, `Ctrl+Backspace`, `Ctrl+Delete`, arrows, function
+keys, and the rest of the normal keyboard go to the shell. `View > Font...` picks
+the terminal font and size.
 
 ## Settings
 
@@ -85,8 +89,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests\run-selftest.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File tests\run-bench.ps1
 ```
 
-Measured on this machine: 450 KiB EXE, 24.2 ms to parse and store 10,000 colored
-lines (120x40, 10k scrollback), 5.3 ms for a resize cycle, about 50 MB RSS with
+Measured on this machine: 460 KiB EXE, 18.5 ms to parse and store 10,000 colored
+lines (120x40, 10k scrollback), 5.9 ms for a resize cycle, about 50 MB RSS with
 10k scrollback lines.
 
 ## Not there yet

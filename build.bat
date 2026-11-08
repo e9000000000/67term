@@ -40,7 +40,7 @@ if errorlevel 1 (
 
 set "CFLAGS=/nologo /std:c++20 /EHsc /W4 /permissive- /utf-8 /DUNICODE /D_UNICODE /DWIN32_LEAN_AND_MEAN /DNOMINMAX /D_CRT_SECURE_NO_WARNINGS /D_WIN32_WINNT=0x0A00 /DWINVER=0x0A00"
 set "LDFLAGS=/nologo /SUBSYSTEM:WINDOWS /OPT:REF /OPT:ICF /LTCG /MAP:build\67t.map"
-set "LIBS=user32.lib gdi32.lib shell32.lib ole32.lib oleaut32.lib advapi32.lib dwmapi.lib uxtheme.lib comctl32.lib imm32.lib shlwapi.lib psapi.lib"
+set "LIBS=user32.lib gdi32.lib comdlg32.lib shell32.lib ole32.lib oleaut32.lib advapi32.lib dwmapi.lib uxtheme.lib comctl32.lib imm32.lib shlwapi.lib psapi.lib"
 
 if /I "%MODE%"=="debug" (
     set "CFLAGS=%CFLAGS% /Od /Zi /MT /DDEBUG"

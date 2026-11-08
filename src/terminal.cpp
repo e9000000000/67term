@@ -424,6 +424,7 @@ void Terminal::resetModes() {
     applicationKeypad_ = false;
     bracketedPaste_ = false;
     focusReporting_ = false;
+    win32InputMode_ = false;
     mouseTracking_ = 0;
     sgrMouse_ = false;
     cursorVisible_ = true;
@@ -1821,6 +1822,9 @@ void Terminal::setMode(int mode, bool enabled, bool privateMode) {
         break;
     case 2004:
         bracketedPaste_ = enabled;
+        break;
+    case 9001:
+        win32InputMode_ = enabled;
         break;
     default:
         break;

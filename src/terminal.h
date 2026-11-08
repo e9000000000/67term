@@ -112,6 +112,7 @@ public:
     bool newlineMode() const { return newlineMode_; }
     bool insertMode() const { return insertMode_; }
     bool autowrap() const { return autowrap_; }
+    bool win32InputMode() const { return win32InputMode_; }
 
     const std::wstring& title() const { return title_; }
     const std::wstring& workingDirectory() const { return workingDirectory_; }
@@ -245,6 +246,7 @@ private:
     bool applicationKeypad_ = false;
     bool bracketedPaste_ = false;
     bool focusReporting_ = false;
+    bool win32InputMode_ = false;
     int mouseTracking_ = 0;  // 0, 1000, 1002, 1003
     bool sgrMouse_ = false;
 

@@ -7,12 +7,11 @@ One process owns one window, any number of tabs, and one ConPTY session per tab.
 ```
 67t.exe
 ├─ main window (custom chrome)
-│  ├─ custom tab strip / title row
-│  ├─ custom menu bar
+│  ├─ title/tab strip: burger menu + tabs + fixed new-tab button
+│  ├─ owner-drawn popup menus (hidden MenuBar host)
 │  ├─ one terminal child HWND per tab (only active visible)
 │  │  ├─ Terminal (parser + screen + scrollback)
 │  │  └─ PtySession (HPCON, child process, reader thread)
-│  └─ custom status bar
 └─ settings.ini / window placement
 ```
 
@@ -85,7 +84,8 @@ State:
 - scroll region (DECSTBM), origin mode, autowrap, insert mode
 - tab stops
 - private modes: cursor keys, keypad, bracketed paste, focus, mouse (1000/1002/
-  1003), SGR mouse (1006), alt screen (47/1047/1049), reverse video (5)
+  1003), SGR mouse (1006), alt screen (47/1047/1049), reverse video (5),
+  Win32 input mode (9001)
 - title (OSC 0/1/2), working directory (OSC 7), clipboard callback (OSC 52)
 - response callback for DA, DSR, window-size reports, DECRQM
 
@@ -129,8 +129,8 @@ user is scrolled up when lines are trimmed, the viewport offset is adjusted.
   scrolled to the bottom.
 - Selection: click-drag, double-click word, triple-click line; highlight and
   copy with trailing spaces trimmed. Ctrl+Shift+C / Ctrl+Shift+V, plus the menu.
-- Scrollback: mouse wheel, Shift+wheel, PageUp/PageDown, Shift+Home/End;
-  an overlay scrollbar on the right; any keystroke returns to the bottom.
+- Scrollback: mouse wheel, Shift+wheel, Shift+PageUp/PageDown; an overlay
+  scrollbar on the right; any keystroke returns to the bottom.
 - Mouse reporting: when the app enables 1000/1002/1003, mouse events are encoded
   as SGR (1006) sequences and sent to the PTY. Shift overrides to local selection.
 - IME: `WM_IME_COMPOSITION` result strings are sent to the PTY; the composition
@@ -140,12 +140,16 @@ Focus changes send `ESC[I` / `ESC[O` when mode 1004 is enabled.
 
 ## Input encoding
 
-`view.cpp` maps Win32 keys to xterm sequences:
+`view.cpp` maps Win32 keys to xterm sequences, and honors Win32 input mode when
+ConPTY requests it (`CSI ? 9001 h`):
 
-- printable text and control characters from `WM_CHAR`, encoded UTF-8
-- arrows/Home/End in normal or application-cursor mode (`ESC[A` vs `SS3 A`)
-- Insert/Delete/PgUp/PgDn/F1–F12, with xterm modifier parameters
-- Alt as an ESC prefix (Alt+letter)
+- Win32 input mode: every key becomes `CSI Vk;Sc;Uc;Kd;Cs;Rc _`, including key
+  releases, left/right modifier bits, locks, extended keys, and repeats. This is
+  what makes Ctrl+Backspace, Ctrl+Delete, Alt+arrows, and the rest of the Windows
+  key space behave exactly like Windows Terminal. Printable keys wait for
+  `WM_CHAR` so dead-key and IME composition still work.
+- Otherwise: classic xterm sequences for arrows/Home/End/Insert/Delete/PgUp/PgDn/
+  F1–F12, Alt as an ESC prefix, and UTF-8 text from `WM_CHAR`.
 - Ctrl+Shift shortcuts reserved for the app; everything else, including Ctrl+C,
   Ctrl+D, Ctrl+Z, reaches the shell
 - paste normalizes CRLF to CR and honors bracketed paste mode
@@ -155,14 +159,17 @@ Focus changes send `ESC[I` / `ESC[O` when mode 1004 is enabled.
 
 Reuses the 67ed visual language exactly:
 
-- Title/tab row (`kTabHeight` 28), menu bar (28), status bar (24)
+- One title/tab row (`kTabHeight` 28): burger menu on the left, tabs in the
+  middle, fixed new-tab `+` on the right. No menu bar and no status bar.
 - `theme::kBg` background, `kPanel` chrome, `kBorder` separators,
   `kText`/`kTextDim`/`kTextFaint`, one `kAccent`
-- Custom-drawn tabs full width with `+`, close buttons, drag reorder,
-  middle-click close
-- Custom owner-drawn dark popup menus
+- Custom-drawn tabs with close buttons, drag reorder, middle-click close
+- Burger opens an owner-drawn dark popup; `File`/`Edit`/`View`/`Help` items open
+  the corresponding section anchored under the burger. `Alt+F/E/V/H` do the same.
+- `View > Font...` opens the fixed-pitch font chooser and applies family/size to
+  every tab.
 - `WM_NCCALCSIZE` removes the caption while keeping the resize frame;
-  `WM_NCHITTEST` makes the tab/menu strip draggable
+  `WM_NCHITTEST` makes the title row draggable
 - DWM immersive dark mode on a best-effort basis
 - All metrics scaled with the window DPI; fonts recreated on DPI change
 
@@ -190,7 +197,8 @@ falls back to defaults without blocking startup.
 - `--selftest`: no visible window. Covers CLI, UTF-8, parser chunking, cursor,
   SGR, erase/edit commands, scroll region, alt screen, tab stops, wide chars,
   OSC title, response generation, scrollback, resize, key encoding, mouse
-  encoding, paste, and a real ConPTY spawn/echo/exit check.
+  encoding, paste, Win32 input-mode records, a real ConPTY spawn/echo/exit check,
+  and a live PowerShell Ctrl+Backspace edit.
 - `--bench`: parser/screen throughput on synthetic output.
 - `--bench-startup`: hidden chrome construction timing and RSS.
 - Test runner: `tests/run-selftest.ps1`.
