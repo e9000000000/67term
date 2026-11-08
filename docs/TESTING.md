@@ -10,13 +10,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests\run-startup.ps1
 ```
 
 The self-test creates no visible window. It writes `build\selftest.log` and exits
-non-zero on a failure. Current check count: **98** (`summary passed=98 failed=0`).
+non-zero on a failure. Current check count: **101** (`summary passed=101 failed=0`).
 
 Coverage:
 
 - CLI option parsing and unknown-option errors
 - UTF-8 encode/decode, wide and combining character widths
 - emoji (astral) cells, VS16 promotion, modifiers, zero-width marks on wide lead cells
+- explicit symbol/CJK font fallback coverage for tofu-prone code points
 - screen print, CR/LF, CUP, erase, SGR indexed/truecolor/attributes, wide cells
 - OSC title, OSC 7 directory, device attributes, cursor position report
 - bracketed paste, application cursor keys, mouse modes, alternate screen
@@ -45,7 +46,7 @@ Reference numbers (this machine, release build):
 
 | Metric | Value |
 |---|---|
-| EXE | 531,456 bytes |
+| EXE | 541,696 bytes |
 | 10,000 lines parse + store | 18.5 ms |
 | Resize cycle (100x30 → 140x45 → 120x40) | 5.9 ms |
 | RSS with 10k scrollback lines | ~50 MB |

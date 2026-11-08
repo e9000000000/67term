@@ -6,6 +6,9 @@
 #include <functional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
 #include "pty.h"
 #include "terminal.h"
@@ -36,6 +39,10 @@ public:
     void setAppearance(const std::wstring& fontFamily, int fontPointSize, bool cursorBlink,
                        int scrollback);
     void applyDpi(UINT dpi);
+
+    // Test seam: true when the primary font or an explicit fallback can draw
+    // this code point (used by the headless suite to catch tofu regressions).
+    bool hasRenderableGlyph(uint32_t codePoint) const;
 
     bool start(const std::wstring& commandLine, const std::wstring& workingDirectory,
                const std::wstring& titleHint);
@@ -144,6 +151,15 @@ private:
     HFONT boldFont_ = nullptr;
     HFONT italicFont_ = nullptr;
     HFONT boldItalicFont_ = nullptr;
+
+    // Explicit fallback fonts: GDI's implicit font linking does not cover every
+    // symbol (for example U+2B1D in Hack/Consolas), which leaves tofu boxes.
+    static constexpr int kFallbackFontCount = 4;
+    HFONT fallbackFonts_[kFallbackFontCount]{};
+    std::vector<std::pair<uint32_t, uint32_t>> primaryCoverage_[4];
+    std::vector<std::pair<uint32_t, uint32_t>> fallbackCoverage_[kFallbackFontCount];
+    std::unordered_map<uint64_t, int> glyphFontCache_;
+    HFONT resolveFont(HFONT primary, int styleIndex, uint32_t codePoint);
     UINT dpi_ = 96;
     int cellWidth_ = 8;
     int cellHeight_ = 16;

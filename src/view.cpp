@@ -115,6 +115,50 @@ std::wstring ChooseFontFamily(const std::wstring& requested) {
     return L"Consolas";
 }
 
+// GLYPHSET covers the BMP; astral characters are handled separately.
+std::vector<std::pair<uint32_t, uint32_t>> BuildCoverage(HDC dc, HFONT font) {
+    std::vector<std::pair<uint32_t, uint32_t>> ranges;
+    if (!font) {
+        return ranges;
+    }
+    HGDIOBJ old = SelectObject(dc, font);
+    const DWORD size = GetFontUnicodeRanges(dc, nullptr);
+    if (size > 0) {
+        std::vector<unsigned char> buffer(size);
+        auto* glyphs = reinterpret_cast<GLYPHSET*>(buffer.data());
+        if (GetFontUnicodeRanges(dc, glyphs)) {
+            ranges.reserve(glyphs->cRanges);
+            for (DWORD i = 0; i < glyphs->cRanges; ++i) {
+                const uint32_t first = glyphs->ranges[i].wcLow;
+                ranges.emplace_back(first, first + glyphs->ranges[i].cGlyphs - 1);
+            }
+        }
+    }
+    SelectObject(dc, old);
+    return ranges;
+}
+
+bool CoverageContains(const std::vector<std::pair<uint32_t, uint32_t>>& ranges, uint32_t cp) {
+    auto it = std::upper_bound(ranges.begin(), ranges.end(), cp,
+                               [](uint32_t value, const std::pair<uint32_t, uint32_t>& range) {
+                                   return value < range.first;
+                               });
+    if (it == ranges.begin()) {
+        return false;
+    }
+    --it;
+    return cp >= it->first && cp <= it->second;
+}
+
+uint32_t CellCodePoint(const vt::Cell& cell) {
+    const wchar_t first = cell.text[0];
+    if (first >= 0xD800 && first <= 0xDBFF && cell.text[1] >= 0xDC00 && cell.text[1] <= 0xDFFF) {
+        return 0x10000 + ((static_cast<uint32_t>(first) - 0xD800) << 10) +
+               (static_cast<uint32_t>(cell.text[1]) - 0xDC00);
+    }
+    return static_cast<uint32_t>(first);
+}
+
 }  // namespace
 
 TerminalView::TerminalView() = default;
@@ -128,6 +172,12 @@ TerminalView::~TerminalView() {
         if (*font) {
             DeleteObject(*font);
             *font = nullptr;
+        }
+    }
+    for (HFONT& font : fallbackFonts_) {
+        if (font) {
+            DeleteObject(font);
+            font = nullptr;
         }
     }
 }
@@ -226,6 +276,13 @@ void TerminalView::ensureFonts() {
             *font = nullptr;
         }
     }
+    for (HFONT& font : fallbackFonts_) {
+        if (font) {
+            DeleteObject(font);
+            font = nullptr;
+        }
+    }
+    glyphFontCache_.clear();
 
     const std::wstring family = ChooseFontFamily(fontFamily_);
     const int height = -MulDiv(fontPointSize_, static_cast<int>(dpi_), 72);
@@ -250,10 +307,78 @@ void TerminalView::ensureFonts() {
     ascent_ = static_cast<int>(metrics.tmAscent);
     textHeight_ = std::max(1, static_cast<int>(metrics.tmHeight));
     SelectObject(dc, old);
+
+    // System fallbacks, in priority order: symbols/icons, colour emoji, CJK,
+    // then a conservative monospace face.
+    const wchar_t* fallbackFamilies[kFallbackFontCount] = {
+        L"Segoe UI Symbol", L"Segoe UI Emoji", L"Microsoft YaHei UI", L"Consolas"};
+    for (int i = 0; i < kFallbackFontCount; ++i) {
+        fallbackFonts_[i] =
+            FontExists(fallbackFamilies[i])
+                ? CreateFontW(height, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+                              OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                              DEFAULT_PITCH | FF_DONTCARE, fallbackFamilies[i])
+                : nullptr;
+    }
+    primaryCoverage_[0] = BuildCoverage(dc, regularFont_);
+    primaryCoverage_[1] = BuildCoverage(dc, boldFont_);
+    primaryCoverage_[2] = BuildCoverage(dc, italicFont_);
+    primaryCoverage_[3] = BuildCoverage(dc, boldItalicFont_);
+    for (int i = 0; i < kFallbackFontCount; ++i) {
+        fallbackCoverage_[i] = BuildCoverage(dc, fallbackFonts_[i]);
+    }
     ReleaseDC(hwnd_, dc);
 
     padding_ = std::max(4, theme::Scale(7, dpi_));
     scrollbarWidth_ = std::max(3, theme::Scale(5, dpi_));
+}
+
+bool TerminalView::hasRenderableGlyph(uint32_t codePoint) const {
+    if (codePoint > 0xFFFF) {
+        return fallbackFonts_[1] != nullptr;
+    }
+    if (CoverageContains(primaryCoverage_[0], codePoint)) {
+        return true;
+    }
+    for (int i = 0; i < kFallbackFontCount; ++i) {
+        if (fallbackFonts_[i] && CoverageContains(fallbackCoverage_[i], codePoint)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+HFONT TerminalView::resolveFont(HFONT primary, int styleIndex, uint32_t codePoint) {
+    if (codePoint == 0 || primaryCoverage_[styleIndex].empty()) {
+        return primary;
+    }
+    const uint64_t key = (static_cast<uint64_t>(styleIndex) << 32) | codePoint;
+    const auto cached = glyphFontCache_.find(key);
+    if (cached != glyphFontCache_.end()) {
+        return cached->second < 0 ? primary : fallbackFonts_[cached->second];
+    }
+
+    int choice = -1;
+    if (codePoint > 0xFFFF) {
+        // GLYPHSET only covers the BMP; use the colour emoji face for astral
+        // characters.
+        if (fallbackFonts_[1]) {
+            choice = 1;
+        }
+    } else if (!CoverageContains(primaryCoverage_[styleIndex], codePoint)) {
+        choice = -2;
+        for (int i = 0; i < kFallbackFontCount; ++i) {
+            if (fallbackFonts_[i] && CoverageContains(fallbackCoverage_[i], codePoint)) {
+                choice = i;
+                break;
+            }
+        }
+    }
+    if (glyphFontCache_.size() > 4096) {
+        glyphFontCache_.clear();
+    }
+    glyphFontCache_[key] = choice;
+    return choice >= 0 ? fallbackFonts_[choice] : primary;
 }
 
 void TerminalView::measure() {
@@ -657,14 +782,19 @@ void TerminalView::paintGrid(HDC dc, const RECT&) {
                 x += cell.width == 0 ? 1 : cell.width;
                 continue;
             }
+            int styleIndex = 0;
             HFONT font = regularFont_;
             if ((cell.attrs & vt::AttrBold) && (cell.attrs & vt::AttrItalic)) {
                 font = boldItalicFont_;
+                styleIndex = 3;
             } else if (cell.attrs & vt::AttrBold) {
                 font = boldFont_;
+                styleIndex = 1;
             } else if (cell.attrs & vt::AttrItalic) {
                 font = italicFont_;
+                styleIndex = 2;
             }
+            font = resolveFont(font, styleIndex, CellCodePoint(cell));
             const COLORREF color = cellForeground(cell);
             if (run.empty()) {
                 // A new run starts here. Without this, text drawn after a gap
@@ -770,7 +900,7 @@ void TerminalView::paintCursor(HDC dc) {
     Fill(dc, rect, theme::kTermCursor);
     const vt::Cell& cell = terminal_.viewCell(x, y);
     if (!cell.empty() && cell.width != 0) {
-        HGDIOBJ oldFont = SelectObject(dc, regularFont_);
+        HGDIOBJ oldFont = SelectObject(dc, resolveFont(regularFont_, 0, CellCodePoint(cell)));
         SetBkMode(dc, TRANSPARENT);
         SetTextColor(dc, theme::kTermCursorText);
         RECT clip = rect;

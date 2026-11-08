@@ -47,7 +47,10 @@ integration still inherit the directory.
 
 Unicode: astral characters are stored as surrogate pairs in one wide cell,
 emoji-presentation code points are width 2, and VS16 (`U+FE0F`) promotes
-text-style symbols to wide emoji. Astral input is sent as UTF-8 text instead of
+text-style symbols to wide emoji. Missing glyphs are resolved through explicit
+system fallbacks (Segoe UI Symbol, Segoe UI Emoji, Microsoft YaHei UI,
+Consolas) instead of relying on GDI font linking, which does not cover every
+symbol. Astral input is sent as UTF-8 text instead of
 Win32 key records, because a record only holds one UTF-16 code unit. Windows
 PowerShell 5.1 deletes one code unit per Backspace and leaves `U+FFFD`; the view
 detects that replacement glyph and sends one follow-up Backspace.
@@ -165,7 +168,7 @@ Measure with `67t.exe --bench-startup` and the self-test timings:
 
 Do not regress these without updating the plan and recording numbers.
 
-Latest measured release build: 531,456-byte EXE; 10,000 colored lines parsed and
+Latest measured release build: 541,696-byte EXE; 10,000 colored lines parsed and
 stored in 18.5 ms; resize cycle 5.9 ms; ~50 MB RSS with 10k scrollback lines;
 hidden chrome construction under 1 ms.
 
@@ -199,9 +202,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests\run-selftest.ps1
   stops, wide characters, emoji width and VS16 promotion, OSC titles, DA/DSR
   responses, scrollback trimming, resize, key encoding, mouse/paste encoding,
   Win32 input-mode records, ConPTY spawn + echo + exit, process current
-  directory, live PowerShell Ctrl+Backspace editing, and emoji input plus the
-  replacement-glyph cleanup. Results are JSON-ish lines; expect
-  `summary passed=98 failed=0`.
+  directory, live PowerShell Ctrl+Backspace editing, emoji input, the
+  replacement-glyph cleanup, and symbol/CJK font fallback coverage. Results are
+  JSON-ish lines; expect `summary passed=101 failed=0`.
 - `--bench [lines]`: parser/screen microbenchmarks on synthetic colored output.
 - `--bench-startup`: hidden chrome construction timing and RSS.
 - Manual smoke: PowerShell and cmd tabs, `dir`, `git status`, colors, Unicode,
@@ -267,6 +270,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests\run-selftest.ps1
   character.
 - Zero-width marks must attach to the wide *lead* cell, not its continuation
   cell. VS16 (`U+FE0F`) promotes a text-style symbol to a two-cell emoji.
+- Do not trust GDI's implicit font linking for symbols. Some fonts (Hack,
+  Consolas) lack characters such as `U+2B1D`, and linking then leaves a tofu
+  box. Cache `GetFontUnicodeRanges` per font and select an explicit fallback;
+  `GLYPHSET` covers only the BMP, so astral characters use the emoji face.
 - `ProcessCurrentDirectory` reads `RTL_USER_PROCESS_PARAMETERS` through the
   PEB; x64 uses offsets 0x20/0x38 and WOW64 targets use 0x10/0x24.
 - Single-instance forwarding uses a hidden top-level window (`67tInstanceHost`)

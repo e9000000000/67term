@@ -615,6 +615,10 @@ void TestStartupComponents(Harness& h) {
         menu.layout(0, 0, 1200, 28);
         tabs.layout(0, 0, 1200, 28);
         view.layout(0, 28, 1200, 724);
+        view.setAppearance(L"Hack", 12, true, 10000);
+        h.check(view.hasRenderableGlyph(0x25A0), L"startup: black square glyph");
+        h.check(view.hasRenderableGlyph(0x2B1D), L"startup: small black square fallback");
+        h.check(view.hasRenderableGlyph(0x4E16), L"startup: CJK fallback");
         const ULONGLONG elapsed = GetTickCount64() - start;
         h.check(elapsed < 500, L"startup: chrome construction under 500 ms",
                 std::to_wstring(elapsed) + L" ms");
