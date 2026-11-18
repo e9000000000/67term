@@ -9,6 +9,7 @@
 #include "headless.h"
 
 #include "cli.h"
+#include "defterm.h"
 #include "input.h"
 #include "menubar.h"
 #include "pty.h"
@@ -216,6 +217,12 @@ void TestScreen(Harness& h) {
     title.feed("\x1b[2;3H\x1b[6n");
     h.check(responses == "\x1b[2;3R", L"screen: DSR cursor report");
 
+    responses.clear();
+    title.feed("\x1b]10;?\x07\x1b]11;?\x1b\\");
+    h.check(responses == "\x1b]10;rgb:cccc/cccc/cccc\x1b\\"
+                         "\x1b]11;rgb:0909/0909/0b0b\x1b\\",
+            L"screen: default color queries");
+
     vt::Terminal modes(20, 5, 10);
     modes.feed("\x1b[?2004h");
     h.check(modes.bracketedPaste(), L"screen: bracketed paste on");
@@ -326,6 +333,8 @@ void TestInput(Harness& h) {
             L"input: SGR mouse release");
     h.check(input::EncodeMouse(0, 4, 2, false, true, true, 0) == "\x1b[<32;5;3M",
             L"input: SGR mouse motion");
+    h.check(input::EncodeMouse(3, 4, 2, false, true, true, 0) == "\x1b[<35;5;3M",
+            L"input: SGR hover has no pressed button");
     const std::string legacy = input::EncodeMouse(0, 0, 0, true, false, false, 0);
     h.check(legacy.size() == 6 && legacy[3] == static_cast<char>(32 + 3), L"input: legacy release");
 
@@ -344,16 +353,19 @@ void TestPty(Harness& h) {
     }
 
     const auto runCommand = [&](const std::wstring& command, std::string& output,
-                                std::wstring& error) {
+                                std::wstring& error, bool answerColors = false) {
         PtySession session;
         if (!session.start(command, ExeDirectory(), 60, 20, nullptr, error)) {
             return false;
         }
+        vt::Terminal terminal(60, 20);
+        terminal.setResponseCallback([&](std::string reply) { session.write(reply); });
         const ULONGLONG deadline = GetTickCount64() + 12000;
         while (GetTickCount64() < deadline) {
             std::string data;
             if (session.drain(data)) {
                 output += data;
+                if (answerColors) terminal.feed(data);
             }
             if (session.exited()) {
                 std::string tail;
@@ -381,6 +393,18 @@ void TestPty(Harness& h) {
     runCommand(L"cmd.exe /d /c \"echo TERM=%TERM%\"", output, error);
     h.check(output.find("xterm-256color") != std::string::npos, L"pty: TERM environment",
             Utf8ToWide(output.substr(0, 160)));
+
+    if (!defterm::OpenConsolePath().empty()) {
+        output.clear();
+        error.clear();
+        const bool colors = runCommand(
+            LR"cmd(powershell.exe -NoProfile -Command "$e=[char]27; [Console]::Write($e+']11;?'+[char]7); $s=''; do { $c=[Console]::ReadKey($true).KeyChar; $s+=$c } while ($c -ne '\'); [Console]::Write('REPLY='+$s.Substring(1))")cmd",
+            output, error, true);
+        h.check(colors && output.find("REPLY=]11;rgb:0909/0909/0b0b") != std::string::npos,
+                L"pty: live color query reaches renderer and reply reaches client", error);
+    } else {
+        h.line(L"[skip] live color query: Windows Terminal OpenConsole is not installed");
+    }
 
     PtySession resize;
     if (resize.start(L"cmd.exe /d /c \"ping -n 2 127.0.0.1 >nul & echo resized-ok\"", ExeDirectory(),
@@ -705,6 +729,15 @@ void TestStartupComponents(Harness& h) {
         h.check(elapsed < 500, L"startup: chrome construction under 500 ms",
                 std::to_wstring(elapsed) + L" ms");
         h.line(L"startup ms=" + std::to_wstring(elapsed));
+        // A single press and drag must start a native selection.
+        const int px = 20;
+        const int py = 20;
+        SendMessageW(view.hwnd(), WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(px, py));
+        SendMessageW(view.hwnd(), WM_MOUSEMOVE, MK_LBUTTON,
+                     MAKELPARAM(px + view.cellWidth() * 5, py));
+        SendMessageW(view.hwnd(), WM_LBUTTONUP, 0,
+                     MAKELPARAM(px + view.cellWidth() * 5, py));
+        h.check(view.hasSelection(), L"view: single press drag selects text");
         DestroyWindow(host);
     }
 }

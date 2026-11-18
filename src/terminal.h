@@ -136,6 +136,7 @@ public:
     int scrollBottom() const { return scrollBottom_; }
 
     // Cell geometry used for pixel-size reports (CSI 14 t / 16 t).
+    void setDefaultColors(Color foreground, Color background) { defaultFg_ = foreground; defaultBg_ = background; }
     void setPixelSize(int width, int height);
     int pixelWidth() const { return pixelWidth_; }
     int pixelHeight() const { return pixelHeight_; }
@@ -236,6 +237,8 @@ private:
     int rows_ = 24;
     int scrollbackLimit_ = 10000;
     int scrollOffset_ = 0;
+    Color defaultFg_ = Color::RgbColor(204, 204, 204);
+    Color defaultBg_ = Color::RgbColor(9, 9, 11);
     bool altActive_ = false;
 
     int cursorX_ = 0;

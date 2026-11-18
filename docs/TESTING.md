@@ -99,3 +99,11 @@ Reference numbers (this machine, release build):
   `HKCU\Console\%%Startup` returns to the previous values.
 - If Windows Terminal is not installed, **Make 67t the Default Terminal** must
   show a clear error instead of leaving the setting half-applied.
+
+Mouse selection and TUI colors: restart Codex, then press once and drag across
+output to select it. Moving the mouse without a button held must not extend the
+selection. Double-click selects a word. Hold Shift to force terminal selection
+in mouse-reporting apps. Compare muted output and the input box with Windows
+Terminal. With Windows Terminal installed, normal tabs use its OpenConsole host
+so foreground/background queries reach 67t; the headless suite tests a live
+query and response through the host, not just the parser.

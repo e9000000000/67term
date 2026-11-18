@@ -33,7 +33,7 @@ constexpr int kTabMinWidth = 96;
 constexpr int kTabMaxWidth = 240;
 
 // Terminal surface.
-constexpr COLORREF kTermFg = RGB(220, 220, 222);
+constexpr COLORREF kTermFg = RGB(204, 204, 204);
 constexpr COLORREF kTermBg = RGB(9, 9, 11);
 constexpr COLORREF kTermSelection = RGB(31, 63, 94);
 constexpr COLORREF kTermSearch = RGB(34, 52, 46);
@@ -47,10 +47,10 @@ constexpr COLORREF kTermBell = RGB(43, 107, 154);
 
 inline COLORREF AnsiColor(int index) {
     static constexpr COLORREF colors[16] = {
-        RGB(24, 24, 27),     RGB(222, 92, 92),    RGB(112, 196, 120), RGB(220, 190, 100),
-        RGB(92, 148, 222),   RGB(190, 120, 220),  RGB(90, 196, 210),  RGB(200, 200, 205),
-        RGB(110, 110, 116),  RGB(255, 122, 122),  RGB(150, 226, 150), RGB(245, 222, 132),
-        RGB(130, 180, 250),  RGB(224, 154, 245),  RGB(132, 228, 240), RGB(248, 248, 250),
+        RGB(12, 12, 12),    RGB(197, 15, 31),   RGB(19, 161, 14),  RGB(193, 156, 0),
+        RGB(0, 55, 218),    RGB(136, 23, 152), RGB(58, 150, 221), RGB(204, 204, 204),
+        RGB(118, 118, 118), RGB(231, 72, 86),  RGB(22, 198, 12),  RGB(249, 241, 165),
+        RGB(59, 120, 255),  RGB(180, 0, 158),  RGB(97, 214, 214), RGB(242, 242, 242),
     };
     return colors[index < 0 ? 0 : (index > 15 ? 15 : index)];
 }

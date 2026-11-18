@@ -52,7 +52,14 @@ load-time failure.
 `PtySession::start`:
 
 1. `CreatePipe` for input and output with inheritable ConPTY-side ends only.
-2. `CreatePseudoConsole({cols, rows}, ptyInputRead, ptyOutputWrite, 0, &hpc)`.
+2. Start the installed Windows Terminal `OpenConsole.exe` through the ConDrv
+   server/reference and inherited-handle protocol used by Microsoft's
+   [winconpty implementation](https://github.com/microsoft/terminal/blob/main/src/winconpty/winconpty.cpp).
+   Its three-handle `HPCON` ABI works with the Windows resize/close functions.
+   If Windows Terminal is not installed, use system `CreatePseudoConsole`.
+   The installed host forwards OSC 10/11 color queries; the inbox host can
+   swallow them, preventing apps such as Codex from discovering the UI colors.
+   No host or DLL is bundled or downloaded.
 3. Close the two ConPTY-side handles in the parent.
 4. Build a UTF-8/UTF-16 environment block that includes `TERM=xterm-256color`
    and `COLORTERM=truecolor`.

@@ -1287,6 +1287,22 @@ void Terminal::dispatchOsc(std::string_view payload) {
     case 7:
         onOscDirectory(rest);
         break;
+    case 10:
+    case 11:
+        if (rest == "?") {
+            const Color& color = code == 10 ? defaultFg_ : defaultBg_;
+            const char hex[] = "0123456789abcdef";
+            std::string reply = "\x1b]" + std::to_string(code) + ";rgb:";
+            for (uint8_t channel : {color.r, color.g, color.b}) {
+                if (reply.back() != ':') reply += '/';
+                for (int i = 0; i < 2; ++i) {
+                    reply += hex[channel >> 4];
+                    reply += hex[channel & 15];
+                }
+            }
+            respond(reply + "\x1b\\");
+        }
+        break;
     case 52:
         onOscClipboard(rest);
         break;

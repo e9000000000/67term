@@ -164,7 +164,12 @@ uint32_t CellCodePoint(const vt::Cell& cell) {
 
 }  // namespace
 
-TerminalView::TerminalView() = default;
+TerminalView::TerminalView() {
+    const auto color = [](COLORREF value) {
+        return vt::Color::RgbColor(GetRValue(value), GetGValue(value), GetBValue(value));
+    };
+    terminal_.setDefaultColors(color(theme::kTermFg), color(theme::kTermBg));
+}
 
 TerminalView::~TerminalView() {
     if (hwnd_) {
@@ -308,7 +313,7 @@ void TerminalView::ensureFonts() {
     const std::wstring family = ChooseFontFamily(fontFamily_);
     const int height = -MulDiv(fontPointSize_, static_cast<int>(dpi_), 72);
     const auto make = [&](int weight, bool italic) {
-        return CreateFontW(height, 0, 0, 0, weight, FALSE, italic, FALSE, DEFAULT_CHARSET,
+        return CreateFontW(height, 0, 0, 0, weight, italic, FALSE, FALSE, DEFAULT_CHARSET,
                            OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
                            FIXED_PITCH | FF_MODERN, family.c_str());
     };
@@ -805,7 +810,7 @@ COLORREF TerminalView::cellForeground(const vt::Cell& cell) const {
         return bg;
     }
     if (cell.attrs & vt::AttrDim) {
-        fg = Blend(fg, bg, 45);
+        fg = Blend(fg, bg, 50);
     }
     return fg;
 }
@@ -1925,7 +1930,7 @@ LRESULT TerminalView::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) 
             const int mode = terminal_.mouseTrackingMode();
             const bool report = mode == 1003 || (mode == 1002 && mouseButtonDown_);
             if (report && (x != lastMouseCellX_ || y != lastMouseCellY_)) {
-                session_.write(encodeMouse(mouseButton_, x, y, false, true));
+                session_.write(encodeMouse(mouseButtonDown_ ? mouseButton_ : 3, x, y, false, true));
                 lastMouseCellX_ = x;
                 lastMouseCellY_ = y;
             }

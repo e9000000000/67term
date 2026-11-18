@@ -208,6 +208,15 @@ bool RegisterServer(const std::wstring& proxySource, std::wstring& error) {
 
 }  // namespace
 
+std::wstring OpenConsolePath() {
+    std::wstring proxy, clsid, error;
+    if (!FindOpenConsole(proxy, clsid, error)) {
+        return {};
+    }
+    const std::wstring path = DirectoryOf(proxy) + L"\\OpenConsole.exe";
+    return FileExists(path) ? path : std::wstring{};
+}
+
 bool IsDefault() {
     std::wstring terminal;
     if (!ReadString(HKEY_CURRENT_USER, kStartupKey, L"DelegationTerminal", terminal)) {

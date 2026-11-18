@@ -6,6 +6,9 @@ namespace defterm {
 
 constexpr wchar_t kTerminalClsid[] = L"{AE70E244-EDF9-4479-A99B-B17033538EDB}";
 
+// Installed Windows Terminal console host, or empty when unavailable.
+std::wstring OpenConsolePath();
+
 // True when 67t is the current per-user default terminal.
 bool IsDefault();
 

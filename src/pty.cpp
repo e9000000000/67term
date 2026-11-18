@@ -1,4 +1,6 @@
 #include "pty.h"
+#include "defterm.h"
+#include <winternl.h>
 
 #include <algorithm>
 #include <cctype>
@@ -36,6 +38,98 @@ const ConPtyApi& Api() {
         return value;
     }();
     return api;
+}
+
+// The three-handle HPCON ABI is shared by Windows and OpenConsole. Launch the
+// installed host using the same ConDrv/handle-list protocol as Microsoft's
+// winconpty implementation, then use Windows' normal resize/close functions.
+// Unlike the inbox host, current OpenConsole forwards OSC color queries.
+HRESULT CreateConsole(COORD size, HANDLE input, HANDLE output, HPCON* console) {
+    static const std::wstring host = defterm::OpenConsolePath();
+    if (host.empty()) {
+        return Api().create(size, input, output, 0, console);
+    }
+    struct Handles {
+        HANDLE server = nullptr, reference = nullptr, signalRead = nullptr, signalWrite = nullptr;
+        ~Handles() {
+            for (HANDLE handle : {server, reference, signalRead, signalWrite}) {
+                if (handle) CloseHandle(handle);
+            }
+        }
+    } handles;
+    using NtOpenFileFn = NTSTATUS(NTAPI*)(PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES,
+                                         PIO_STATUS_BLOCK, ULONG, ULONG);
+    using StatusToErrorFn = ULONG(WINAPI*)(NTSTATUS);
+    const HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+    const auto open = reinterpret_cast<NtOpenFileFn>(GetProcAddress(ntdll, "NtOpenFile"));
+    const auto statusToError = reinterpret_cast<StatusToErrorFn>(
+        GetProcAddress(ntdll, "RtlNtStatusToDosError"));
+    if (!open || !statusToError) return E_NOTIMPL;
+    const auto openDevice = [&](HANDLE& handle, const wchar_t* path, HANDLE parent,
+                                ACCESS_MASK access, bool inherit, ULONG options) {
+        UNICODE_STRING name{};
+        name.Buffer = const_cast<wchar_t*>(path);
+        name.Length = static_cast<USHORT>(wcslen(path) * sizeof(wchar_t));
+        name.MaximumLength = name.Length + sizeof(wchar_t);
+        OBJECT_ATTRIBUTES attrs{};
+        InitializeObjectAttributes(&attrs, &name, OBJ_CASE_INSENSITIVE | (inherit ? OBJ_INHERIT : 0),
+                                   parent, nullptr);
+        IO_STATUS_BLOCK io{};
+        const NTSTATUS status = open(&handle, access, &attrs, &io,
+                                      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, options);
+        return status < 0 ? HRESULT_FROM_WIN32(statusToError(status)) : S_OK;
+    };
+    HRESULT result = openDevice(handles.server, L"\\Device\\ConDrv\\Server", nullptr,
+                                GENERIC_ALL, true, 0);
+    if (FAILED(result)) return result;
+    result = openDevice(handles.reference, L"\\Reference", handles.server,
+                        GENERIC_READ | GENERIC_WRITE | SYNCHRONIZE, false,
+                        FILE_SYNCHRONOUS_IO_NONALERT);
+    if (FAILED(result)) return result;
+    SECURITY_ATTRIBUTES security{sizeof(security), nullptr, TRUE};
+    if (!CreatePipe(&handles.signalRead, &handles.signalWrite, &security, 0)) {
+        return HRESULT_FROM_WIN32(GetLastError());
+    }
+    SetHandleInformation(handles.signalWrite, HANDLE_FLAG_INHERIT, 0);
+    STARTUPINFOEXW startup{};
+    startup.StartupInfo.cb = sizeof(startup);
+    startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+    startup.StartupInfo.hStdInput = input;
+    startup.StartupInfo.hStdOutput = output;
+    startup.StartupInfo.hStdError = output;
+    SIZE_T bytes = 0;
+    InitializeProcThreadAttributeList(nullptr, 1, 0, &bytes);
+    std::vector<unsigned char> storage(bytes);
+    startup.lpAttributeList = reinterpret_cast<PPROC_THREAD_ATTRIBUTE_LIST>(storage.data());
+    if (!InitializeProcThreadAttributeList(startup.lpAttributeList, 1, 0, &bytes)) {
+        return HRESULT_FROM_WIN32(GetLastError());
+    }
+    HANDLE inherited[] = {handles.server, input, output, handles.signalRead};
+    const BOOL updated = UpdateProcThreadAttribute(startup.lpAttributeList, 0,
+        PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inherited, sizeof(inherited), nullptr, nullptr);
+    wchar_t arguments[160]{};
+    swprintf_s(arguments, L" --headless --width %d --height %d --signal 0x%llx --server 0x%llx",
+               size.X, size.Y, reinterpret_cast<unsigned long long>(handles.signalRead),
+               reinterpret_cast<unsigned long long>(handles.server));
+    std::wstring command = L"\"" + host + L"\"" + arguments;
+    PROCESS_INFORMATION process{};
+    const BOOL created = updated && CreateProcessW(host.c_str(), command.data(), nullptr, nullptr,
+        TRUE, EXTENDED_STARTUPINFO_PRESENT, nullptr, nullptr, &startup.StartupInfo, &process);
+    const DWORD error = GetLastError();
+    DeleteProcThreadAttributeList(startup.lpAttributeList);
+    if (!created) return HRESULT_FROM_WIN32(error);
+    CloseHandle(process.hThread);
+    struct ConsoleHandles { HANDLE signal, reference, process; };
+    auto packed = static_cast<ConsoleHandles*>(HeapAlloc(GetProcessHeap(), 0, sizeof(ConsoleHandles)));
+    if (!packed) {
+        TerminateProcess(process.hProcess, 1);
+        CloseHandle(process.hProcess);
+        return E_OUTOFMEMORY;
+    }
+    *packed = {handles.signalWrite, handles.reference, process.hProcess};
+    handles.signalWrite = handles.reference = nullptr;
+    *console = reinterpret_cast<HPCON>(packed);
+    return S_OK;
 }
 
 std::wstring ErrorText(DWORD error) {
@@ -261,13 +355,14 @@ bool PtySession::start(const std::wstring& commandLine, const std::wstring& work
 
     HPCON hpc = nullptr;
     const COORD size{static_cast<SHORT>(columns), static_cast<SHORT>(rows)};
-    const HRESULT result = Api().create(size, ptyInput, ptyOutput, 0, &hpc);
+    const HRESULT result = CreateConsole(size, ptyInput, ptyOutput, &hpc);
     if (FAILED(result) || !hpc) {
         CloseHandle(ptyInput);
         CloseHandle(inputWrite);
         CloseHandle(outputRead);
         CloseHandle(ptyOutput);
-        error = L"Cannot create the pseudo console: " + ErrorText(static_cast<DWORD>(result));
+        error = L"Cannot create the pseudo console (" + defterm::OpenConsolePath() +
+                L"): " + ErrorText(static_cast<DWORD>(result));
         return false;
     }
     CloseHandle(ptyInput);
